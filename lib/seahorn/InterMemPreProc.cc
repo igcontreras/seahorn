@@ -3,8 +3,8 @@
 #include "seahorn/InterMemPreProc.hh"
 #include "seahorn/Support/SeaDebug.h"
 
-#include "seadsa/DsaAnalysis.hh"
 #include "seadsa/CallGraphUtils.hh"
+#include "seadsa/DsaAnalysis.hh"
 #include "seadsa/Global.hh"
 
 namespace {
@@ -17,73 +17,100 @@ using ExplorationMap = DenseMap<const Node *, EColor>;
 
 bool isSafeNode(NodeSet &unsafe, const Node *n) { return unsafe.count(n) == 0; }
 
-void propagate_not_copy(const Node &n, ExplorationMap &f_color, NodeSet &f_safe,
-                        NodeSet &f_safe_caller, SimulationMapper &sm) {
-  if (isSafeNode(f_safe, &n))
-    f_safe.insert(&n); // we store the ones that are not safe
+struct ExplorationInfo {
+  ExplorationMap m_explColor;
+  NodeSet &m_calleeUnsafe;
+  NodeSet &m_callerUnsafe;
+  SimulationMapper &m_sm;
+  ExplorationInfo(NodeSet &calleeUnsafe, NodeSet &callerUnsafe,
+                  SimulationMapper &sm)
+      : m_calleeUnsafe(calleeUnsafe), m_callerUnsafe(callerUnsafe), m_sm(sm) {}
+};
 
-  f_color[&n] = EColor::BLACK;
+static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
+                                    ExplorationInfo &ei) {
+
+  if (isSafeNode(ei.m_calleeUnsafe, &n))
+    ei.m_calleeUnsafe.insert(&n); // we store the ones that are not safe
+  if (isSafeNode(ei.m_callerUnsafe, &nCaller))
+    ei.m_callerUnsafe.insert(&nCaller); // we store the ones that are not safe
+
+  ei.m_explColor[&n] = EColor::BLACK;
 
   for (auto &links : n.getLinks()) {
     const Field &f = links.first;
-    const Cell &next_c = *links.second;
-    const Node *next_n = next_c.getNode();
+    const Cell &nextC = *links.second;
+    const Node *nextN = nextC.getNode();
 
-    auto next = f_color.find(next_n);
+    auto next = ei.m_explColor.find(nextN);
 
-    bool explored = next != f_color.end() && next->getSecond() == EColor::BLACK;
-    bool marked_safe = isSafeNode(f_safe, next_n);
+    bool explored =
+        next != ei.m_explColor.end() && next->getSecond() == EColor::BLACK;
+    bool marked_safe = isSafeNode(ei.m_calleeUnsafe, nextN);
 
     if (!(explored && !marked_safe)) {
-      const Node &next_n_caller = *sm.get(next_c).getNode();
+      const Node &nNextCaller = *ei.m_sm.get(nextC).getNode();
 
-      if (isSafeNode(f_safe_caller, &next_n_caller))
-        f_safe_caller.insert(&next_n_caller);
-
-      propagate_not_copy(*next_n, f_color, f_safe, f_safe_caller, sm);
+      propagateUnsafeChildren(*nextN, nNextCaller, ei);
     }
   }
 }
 
-bool mark_copy(const Node &n, ExplorationMap &f_color, NodeSet &f_safe,
-               NodeSet &f_safe_caller, SimulationMapper &sm) {
-  f_color[&n] = EColor::GRAY;
+static bool exploreNode(const Node &nCallee, const Node &nCaller,
+                        ExplorationInfo &ei) {
+  ei.m_explColor[&nCallee] = EColor::GRAY;
 
-  for (auto &links : n.getLinks()) {
+  for (auto &links : nCallee.getLinks()) {
     const Field &f = links.first;
-    const Cell &next_c = *links.second;
-    const Node *next_n = next_c.getNode();
-    auto it = f_color.find(next_n);
-    if (next_n->isArray()){ // encodes an object of unbounded size
-      propagate_not_copy(n, f_color, f_safe, f_safe_caller, sm);
+    const Cell &nextC = *links.second;
+    const Cell &nextCaller = ei.m_sm.get(nextC);
+    const Node *nextN = nextC.getNode();
+    auto it = ei.m_explColor.find(nextN);
+    const Node *nextNCaller = nextCaller.getNode();
+    if (nextN->isArray()) { // encodes an object of unbounded size
+      propagateUnsafeChildren(nCallee, nCaller, ei);
       return true;
-    }
-    else if (it == f_color.end() && mark_copy(*next_n, f_color, f_safe,f_safe_caller,sm)) {
+    } else if (it == ei.m_explColor.end() &&
+               exploreNode(*nextN, *nextCaller.getNode(), ei))
       return true;
-    } else if (it != f_color.end() && it->getSecond() == EColor::GRAY) {
-      propagate_not_copy(n, f_color, f_safe,f_safe_caller,sm);
+    else if (it != ei.m_explColor.end() && it->getSecond() == EColor::GRAY) {
+      propagateUnsafeChildren(nCallee, nCaller, ei);
       return true;
     }
   }
-
-  f_color[&n] = EColor::BLACK;
+  ei.m_explColor[&nCallee] = EColor::BLACK;
 
   return false;
 }
 
-void mark_nodes_graph(Graph &g, const Function &F, NodeSet &f_safe,
-                      NodeSet &f_safe_caller, SimulationMapper &sm) {
-  ExplorationMap f_visited;
+static void computeUnsafeNodesSimulation(Graph &fromG, const Function &F,
+                                         NodeSet &fromUnsafe,
+                                         NodeSet &callerUnsafe,
+                                         SimulationMapper &sm) {
+  ExplorationInfo ei(fromUnsafe, callerUnsafe, sm);
 
   for (const Argument &a : F.args()) {
-    if (g.hasCell(a)) { // scalar arguments don't have cells
-      const Cell &c = g.getCell(a);
+    if (fromG.hasCell(a)) { // scalar arguments don't have cells
+      const Cell &c = fromG.getCell(a);
       const Node *n = c.getNode();
-      mark_copy(*n, f_visited, f_safe, f_safe_caller, sm);
+      const Cell &cCaller = sm.get(c);
+      exploreNode(*n, *cCaller.getNode(), ei);
     }
   }
-}
 
+  // globals
+  for (auto &kv :
+       boost::make_iterator_range(fromG.globals_begin(), fromG.globals_end())) {
+    Cell &c = *kv.second;
+    exploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
+  }
+
+  // return cell
+  if (fromG.hasRetCell(F)) {
+    Cell &c = fromG.getRetCell(F);
+    exploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
+  }
+}
 } // namespace
 
 using namespace llvm;
@@ -99,73 +126,171 @@ bool InterMemPreProc::runOnModule(Module &M) {
     auto &scc = *it;
     for (CallGraphNode *cgn : scc) {
       Function *f_caller = cgn->getFunction();
-      if (!f_caller || f_caller->isDeclaration() || f_caller->empty() || !ga.hasGraph(*f_caller))
+      if (!f_caller || f_caller->isDeclaration() || f_caller->empty() ||
+          !ga.hasGraph(*f_caller))
         continue;
 
       for (auto &callRecord : *cgn) {
-        llvm::Optional<DsaCallSite> dsaCS = call_graph_utils::getDsaCallSite(callRecord);
-        if (!dsaCS.hasValue())
+        llvm::Optional<DsaCallSite> optDsaCS =
+            call_graph_utils::getDsaCallSite(callRecord);
+        if (!optDsaCS.hasValue())
           continue;
-        DsaCallSite &cs = dsaCS.getValue();
-        const Function * f_callee = cs.getCallee();
+        DsaCallSite &dsaCS = optDsaCS.getValue();
+        const Function *f_callee = dsaCS.getCallee();
         if (!ga.hasSummaryGraph(*f_callee))
           continue;
 
-        LOG("inter_mem", errs() << "Preprocessing " << f_caller->getGlobalIdentifier(););
+        LOG("inter_mem_preproc",
+            errs() << "Preprocessing " << f_caller->getGlobalIdentifier(););
 
         ColorMap color_callee, color_caller;
         NodeSet f_node_safe;
 
         const Graph &callerG = ga.getGraph(*f_caller);
-        const Graph &calleeG = ga.getSummaryGraph(*f_callee);
+        const Graph &fromG = ga.getSummaryGraph(*f_callee);
 
-        std::unique_ptr<SimulationMapper> simMap = std::make_unique<SimulationMapper>();
+        const Instruction *I = dsaCS.getInstruction();
 
-        Graph::computeCalleeCallerMapping(cs, *(const_cast<Graph *>(&calleeG)),
+        // creating the SimulationMapper object
+        SimulationMapper &simMap = m_smCS[I];
+
+        Graph::computeCalleeCallerMapping(dsaCS, *(const_cast<Graph *>(&fromG)),
                                           *(const_cast<Graph *>(&callerG)),
-                                          *simMap);
+                                          simMap);
 
-        std::unique_ptr<NodeSet> unsafe_callee = std::make_unique<NodeSet>();
-        std::unique_ptr<NodeSet> unsafe_caller = std::make_unique<NodeSet>();
+        // errs() << "callee:\n";
+        // fromG.dump();
+        // errs() << "caller:\n";
+        // callerG.dump();
 
-        mark_nodes_graph(*(const_cast<Graph *>(&calleeG)), *f_callee,
-                         *unsafe_callee, *unsafe_caller, *simMap);
+        NodeSet &unsafeCallee = getUnsafeNodesCalleeCS(I);
+        NodeSet &unsafeCaller = getUnsafeNodesCallerCS(I);
+        NodeSet &unsafeCalleeCI = getUnsafeNodes(f_callee);
 
-        if(m_unsafen_f_callee.find(f_callee) == m_unsafen_f_callee.end()){
-          std::unique_ptr<NodeSet> ci_unsafe = std::make_unique<NodeSet>();
-          m_unsafen_f_callee[f_callee] = std::move(ci_unsafe);
-        }
-        NodeSet &ci_unsafe_callee = *m_unsafen_f_callee[f_callee];
+        computeUnsafeNodesSimulation(*(const_cast<Graph *>(&fromG)), *f_callee,
+                                     unsafeCallee, unsafeCaller, simMap);
 
-        for (auto n : *unsafe_callee)
-          if (!ci_unsafe_callee.count(n))
-            ci_unsafe_callee.insert(n);
+        // errs() << "Unsafe nodes callee:\n";
+        // for (auto n : unsafeCallee) {
+        //   n->dump();
+        //   errs() << "\n";
+        //   if (!unsafeCalleeCI.count(n))
+        //     unsafeCalleeCI.insert(n);
+        //   // Node * n = simMap.get()
+        //   //   unsafeCaller.insert
+        // }
 
-        const Instruction * I = cs.getInstruction();
-        m_sms[I] = std::move(simMap);
-        m_unsafen_cs_callee[I] = std::move(unsafe_callee);
-        m_unsafen_cs_caller[I] = std::move(unsafe_caller);
+        // errs() << "Unsafe nodes caller:\n";
+        // for (auto n : unsafeCaller) {
+        //   n->dump();
+        //   errs() << "\n";
+        // }
       }
     }
   }
   return false;
 }
 
-NodeSet &InterMemPreProc::getUnsafeCallerNodesCallSite(const CallSite &cs) {
-  auto ns = m_unsafen_cs_caller.find(cs.getInstruction());
-  assert(ns != m_unsafen_cs_caller.end());
-  return *ns->getSecond();
+NodeSet &InterMemPreProc::getUnsafeNodesCallerCS(const Instruction *I) {
+  const CallInst *CI = dyn_cast<const CallInst>(I);
+  assert(CI);
+  return m_unsafen_cs_caller[I];
 }
-SimulationMapper &InterMemPreProc::getSimulationCallSite(const CallSite &cs) {
-  auto ns = m_sms.find(cs.getInstruction());
-  assert(ns != m_sms.end());
 
-  return *ns->getSecond();
+NodeSet &InterMemPreProc::getUnsafeNodesCalleeCS(const Instruction *I) {
+  const CallInst *CI = dyn_cast<const CallInst>(I);
+  assert(CI);
+  return m_unsafen_cs_callee[I];
 }
 
 bool InterMemPreProc::isSafeNode(NodeSet &unsafe, const Node *n) {
   return ::isSafeNode(unsafe, n);
 }
 
-} // namespace seahorn
+bool InterMemPreProc::isSafeNodeFunc(const Node &n, const Function *f) {
+  assert(m_unsafeNF.count(f) > 0);
+  return m_unsafeNF[f].count(&n) == 0;
+}
 
+void InterMemPreProc::preprocFunction(const Function *F) {
+
+  errs() << "-------- Preprocessing " << F->getGlobalIdentifier() << "\n";
+
+  GlobalAnalysis &ga = m_shadowDsa.getDsaAnalysis();
+
+  Graph &buG = ga.getSummaryGraph(*F);
+  const Graph &sasG = ga.getGraph(*F);
+
+  // creates the SimulationMapper object
+  SimulationMapper &simMap = m_smF[F];
+
+  bool simulated = Graph::computeSimulationMapping(
+      *(const_cast<Graph *>(&buG)), *(const_cast<Graph *>(&sasG)), simMap);
+  assert(simulated && "Summary graph could not be simulated with SAS graph");
+
+  NodeSet &unsafeSAS = m_unsafeNF[F];
+  NodeSet unsafeBU; // won't be used later
+  computeUnsafeNodesSimulation(*(const_cast<Graph *>(&buG)), *F, unsafeBU,
+                               unsafeSAS, simMap);
+
+  // compute number of accesses to safe nodes
+  NodeSet explored;
+  RegionsMap &rm = m_frm[F];
+
+  for (const Argument &a : F->args())
+    if (buG.hasCell(a))
+      recProcessNode(buG.getCell(a), unsafeSAS, simMap, explored, rm);
+
+  for (auto &kv :
+       boost::make_iterator_range(buG.globals_begin(), buG.globals_end())) {
+    Cell &c = *kv.second;
+    recProcessNode(c, unsafeSAS, simMap, explored, rm);
+  }
+
+  for (auto &kv : buG.scalars()) {
+    Cell &c = *kv.second;
+    recProcessNode(c, unsafeSAS, simMap, explored, rm);
+  }
+
+  if (buG.hasRetCell(*F))
+    recProcessNode(buG.getRetCell(*F), unsafeSAS, simMap, explored, rm);
+
+    errs() << "Unsafe nodes of " << F->getGlobalIdentifier() << "\n";
+    for (auto n : unsafeSAS) {
+      n->dump();
+      errs() << "\n";
+    }
+  }
+
+void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
+                                     SimulationMapper &simMap,
+                                     NodeSet &explored, RegionsMap &rm) {
+
+  const Node *nFrom = cFrom.getNode();
+  explored.insert(nFrom);
+
+  if (nFrom->size() == 0 || nFrom->isArray())
+    // the array was created but not accessed in this graph
+    return;
+
+  const Cell &cTo = simMap.get(cFrom);
+  const Node *nTo = cTo.getNode();
+
+  if ( // nFrom->isModified() &&
+      !cFrom.getNode()->types().empty() && isSafeNode(unsafeNodes, nTo))
+    rm[nTo] = rm[nTo] + cFrom.getNode()->types().size();
+
+  if (nFrom->getLinks().empty())
+    return;
+
+  // follow the pointers of the node
+  for (auto &links : nFrom->getLinks()) {
+    const Cell &nextC = *links.second;
+    const Node *nextN = nextC.getNode();
+
+    if (explored.find(nextN) == explored.end()) // not explored yet
+      recProcessNode(nextC, unsafeNodes, simMap, explored, rm);
+  }
+}
+
+} // namespace seahorn

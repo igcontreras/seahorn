@@ -106,7 +106,8 @@ VisitAction FiniteMapArgsVisitor::operator()(Expr exp) {
     // efficiency: are we traversing the newly created unifs?
     return VisitAction::changeDoKids(newExp);
 
-  } else if (isOpX<FAPP>(exp) &&
+  } else
+  if (isOpX<FAPP>(exp) &&
              !bind::IsConst()(exp)) { // faster to check arity >= 2?
     Expr fdecl = *exp->args_begin();
     if (m_pred_decl_t.count(fdecl) > 0) { // needs to be transformed

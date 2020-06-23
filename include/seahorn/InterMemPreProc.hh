@@ -1,53 +1,85 @@
 #pragma once
 
 #include "seadsa/CompleteCallGraph.hh"
+#include "seadsa/DsaColor.hh"
 #include "seadsa/Mapper.hh"
 #include "seadsa/ShadowMem.hh"
-#include "seadsa/DsaColor.hh"
 
 namespace seahorn {
 
-  // preprocesor for vcgen with memory copies
-  class InterMemPreProc {
-    /*! \brief Keeps for each CallSite of a module the simulation relation
-     * between the caller and the callee (context sensitive), the nodes that
-     * unsafe to copy per callee, caller and function (context insensitive).
-     */
+// preprocesor for vcgen with memory copies
+class InterMemPreProc {
+  /*! \brief Keeps for each CallSite of a module the simulation relation
+   * between the caller and the callee (context sensitive), the nodes that
+   * unsafe to copy per callee, caller and function (context insensitive).
+   */
 
-  private:
-    seadsa::CompleteCallGraph &m_ccg;
-    seadsa::ShadowMem &m_shadowDsa;
+private:
+  seadsa::CompleteCallGraph &m_ccg;
+  seadsa::ShadowMem &m_shadowDsa;
 
-    using SimMapperMap =
-        llvm::DenseMap<const llvm::Instruction *,
-                       std::unique_ptr<seadsa::SimulationMapper>>;
-    SimMapperMap m_sms;
+  using SimMapperCSMap =
+      llvm::DenseMap<const llvm::Instruction *, seadsa::SimulationMapper>;
+  SimMapperCSMap m_smCS;
 
-    using NodesCSMap = llvm::DenseMap<const llvm::Instruction *,
-                                      std::unique_ptr<NodeSet>>;
+  using SimMapperFMap =
+      llvm::DenseMap<const llvm::Function *, seadsa::SimulationMapper>;
+  SimMapperFMap m_smF;
 
-    NodesCSMap
-        m_unsafen_cs_callee; // set of unsafe nodes in the callee of callsite
-    NodesCSMap
-        m_unsafen_cs_caller; // set of unsafe nodes in the caller of callsite
+  using NodesCSMap = llvm::DenseMap<const llvm::Instruction *, NodeSet>;
 
-    using NodeFMap = llvm::DenseMap<const llvm::Function *, std::unique_ptr<NodeSet>>;
+  NodesCSMap
+      m_unsafen_cs_callee; // set of unsafe nodes in the callee of callsite
+  NodesCSMap
+      m_unsafen_cs_caller; // set of unsafe nodes in the caller of callsite
 
-    NodeFMap
-        m_unsafen_f_callee; // set of unsafe nodes in the callee of a function
+  using NodeFMap = llvm::DenseMap<const llvm::Function *, NodeSet>;
 
-  public:
-    InterMemPreProc(seadsa::CompleteCallGraph &ccg,
-                    seadsa::ShadowMem &shadowDsa)
-        : m_ccg(ccg), m_shadowDsa(shadowDsa){};
+  NodeFMap m_unsafeNF; // set of unsafe nodes in the callee of a function
 
-    /*! \brief For each CallSite of a module, it obtains the simulation relation
-     *   between the caller and the callee (context sensitive) and stores it.
-     * This is used to compute which nodes are unsafe to copy.
-     */
-    bool runOnModule(llvm::Module &M);
-    NodeSet &getUnsafeCallerNodesCallSite(const llvm::CallSite &cs);
-    bool isSafeNode(NodeSet &unsafe, const seadsa::Node *n);
-    seadsa::SimulationMapper &getSimulationCallSite(const llvm::CallSite &cs);
-  };
+  using RegionsMap = llvm::DenseMap<const Node *, unsigned>;
+  using FunctionRegionsMap = llvm::DenseMap<const llvm::Function *, RegionsMap>;
+  FunctionRegionsMap m_frm;
+
+public:
+  InterMemPreProc(seadsa::CompleteCallGraph &ccg, seadsa::ShadowMem &shadowDsa)
+      : m_ccg(ccg), m_shadowDsa(shadowDsa){};
+
+  /*! \brief For each CallSite of a module, it obtains the simulation relation
+   *   between the caller and the callee (context sensitive) and stores it.
+   * This is used to compute which nodes are unsafe to copy.
+   */
+  bool runOnModule(llvm::Module &M);
+
+  // add methods to test if the sets were created
+  NodeSet &getUnsafeNodesCallerCS(const Instruction *I);
+  NodeSet &getUnsafeNodesCalleeCS(const Instruction *I);
+
+  bool isSafeNode(NodeSet &unsafe, const seadsa::Node *n);
+  bool isSafeNodeFunc(const Node &n, const Function *f);
+
+  void preprocFunction(const Function *f);
+
+  bool hasSimulationF(const Function *f) { m_smF.count(f) > 0; }
+  seadsa::SimulationMapper &getSimulationF(const Function *f) {
+    return m_smF[f];
+  }
+
+  bool hasSimulationCS(const CallSite &cs) { m_smCS.count(cs.getInstruction()) > 0; }
+  seadsa::SimulationMapper &getSimulationCS(const CallSite &cs) {
+    return m_smCS[cs.getInstruction()];
+  }
+
+  NodeSet &getUnsafeNodes(const Function *f) { return m_unsafeNF[f]; }
+
+  unsigned getNumAccesses(const Node *n, const Function *f) {
+    assert(m_frm.count(f) > 0);
+    return m_frm[f][n];
+  }
+
+private:
+  void recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
+                      SimulationMapper &simMap, NodeSet &explored,
+                      RegionsMap &rm);
+};
 } // namespace seahorn

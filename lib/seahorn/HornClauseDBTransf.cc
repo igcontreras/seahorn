@@ -1,6 +1,8 @@
 #include "seahorn/HornClauseDBTransf.hh"
 #include "seahorn/FiniteMapTransf.hh"
 
+#include "seahorn/Support/SeaDebug.h"
+
 namespace seahorn {
 using namespace expr;
 
@@ -94,8 +96,23 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
     ExprSet allVars(vars.begin(), vars.end());
     DagVisitCache dvc; // TODO: same for all the clauses?
     FiniteMapArgsVisitor fmav(allVars, predDeclTransf, efac);
-    Expr newRule = visit(fmav, rule.get(), dvc);
-    tdb.addRule(allVars, newRule);
+
+    // rewrites the rule head as an fapp
+    Expr newHead = visit(fmav, rule.head(), dvc);
+    Expr newUnifs = nullptr;
+    if (isOpX<AND>(newHead)) { // move unifs to body
+      newUnifs = newHead->left();
+      newHead = newHead->right();
+    } else
+      newUnifs = mk<TRUE>(efac);
+
+    Expr newBody = visit(fmav, rule.body(), dvc);
+    // LOG("fmap_transf_rule", errs() << "old rule:\n\t" << *rule.body()
+    //                                << "\nnew rule:\n\t" << *newBody <<
+    //                                "\n";);
+    // errs() << "------- body:\n" << *rule.body() << "\n";
+
+    tdb.addRule(allVars, boolop::limp(mk<AND>(newUnifs, newBody), newHead));
   }
 
   // copy queries
@@ -122,9 +139,19 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
 
     HornRule new_rule(newVars, rule.head(), body);
 
+    // errs() << *rule.get() << "\n";
+    // errs() << *new_rule.get() << "\n";
+
     tdb.removeRule(rule);
     tdb.addRule(new_rule);
   }
+
+  LOG(
+      "print_clauses", errs() << "------- TRANSFORMED CLAUSE DB ------\n";
+      for (auto &cl
+           : tdb.getRules()) { cl.get()->dump(); });
 }
+
+void myDump(Expr e) { e->dump(); }
 
 } // namespace seahorn

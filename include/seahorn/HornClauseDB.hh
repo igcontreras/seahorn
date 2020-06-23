@@ -4,11 +4,11 @@
 
 #include "llvm/Support/raw_ostream.h"
 
+#include <boost/container/flat_set.hpp>
 #include <boost/functional/hash.hpp>
+#include <boost/lexical_cast.hpp>
 #include <boost/range.hpp>
 #include <boost/range/algorithm/copy.hpp>
-#include <boost/lexical_cast.hpp>
-#include <boost/container/flat_set.hpp>
 
 #include "seahorn/Expr/Expr.hh"
 #include "seahorn/Expr/ExprOpBinder.hh"

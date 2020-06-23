@@ -1,13 +1,14 @@
 #include "seahorn/HornifyFunction.hh"
+#include "seahorn/Expr/ExprLlvm.hh"
+#include "seahorn/InterMemPreProc.hh"
 #include "seahorn/LiveSymbols.hh"
 #include "seahorn/Support/CFG.hh"
-#include "seahorn/Expr/ExprLlvm.hh"
 #include "seahorn/Support/ExprSeahorn.hh"
 #include "seahorn/Support/Stats.hh"
 
+#include "seahorn/Support/SeaDebug.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
-#include "seahorn/Support/SeaDebug.h"
 
 static llvm::cl::opt<bool>
     ReduceFalse("horn-reduce-constraints",
@@ -32,9 +33,13 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
     return;
 
   const Function &F = *BB.getParent();
+
   // main does not need a summary
-  if (F.getName().equals("main"))
+  if (F.getName().equals("main")) {
+    if (m_interprocFmaps) // the finite memory regions need to be precomputed
+      m_parent.getInterMemPP().preprocFunction(&F);
     return;
+  }
 
   FunctionInfo &fi = m_sem.getFunctionInfo(F);
 
@@ -44,6 +49,9 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
   //  3. outgoing value of error.flag
   Expr boolSort = sort::boolTy(m_efac);
   ExprVector sorts{boolSort, boolSort, boolSort};
+
+  if (m_interprocFmaps) // precompute finite memory regions
+    m_parent.getInterMemPP().preprocFunction(&F);
 
   // memory regions
   for (const Instruction &inst : BB) {
@@ -386,7 +394,8 @@ void LargeHornifyFunction::runOnFunction(Function &F) {
           if (!bind::isFapp(e) || isConst(e))
             smt.assertExpr(e);
         }
-        LOG("reduce",
+        LOG(
+            "reduce",
 
             std::error_code EC;
             raw_fd_ostream file("/tmp/edge.smt2", EC, sys::fs::F_Text);
