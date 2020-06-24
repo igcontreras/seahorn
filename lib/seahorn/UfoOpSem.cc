@@ -1541,8 +1541,8 @@ void MemUfoOpSem::recVCGenMem(const Cell &c_callee, Expr ptr,
   }
 }
 
-// stores the name(s) of the array(s) that represents every cell involved in
-// the CallSite
+// stores the name(s) of the array(s) that represents every cell involved in the
+// CallSite
 void MemUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
 
   unsigned i = csi.m_fparams.size() - 1;
