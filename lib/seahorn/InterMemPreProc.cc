@@ -188,6 +188,12 @@ bool InterMemPreProc::runOnModule(Module &M) {
       }
     }
   }
+
+  // this includes auxiliary functions, how do I get the original written by the user?
+  for (const Function & f : M)
+    if(ga.hasSummaryGraph(f))
+      preprocFunction(&f);
+
   return false;
 }
 
@@ -247,19 +253,20 @@ void InterMemPreProc::preprocFunction(const Function *F) {
     recProcessNode(c, unsafeSAS, simMap, explored, rm);
   }
 
-  for (auto &kv : buG.scalars()) {
+  // TODO: replace by a flag, uncomment to get rid of as many arrays as possible
+  LOG("fmap_scalars", for (auto &kv : buG.scalars()) {
     Cell &c = *kv.second;
     recProcessNode(c, unsafeSAS, simMap, explored, rm);
-  }
+    });
 
   if (buG.hasRetCell(*F))
     recProcessNode(buG.getRetCell(*F), unsafeSAS, simMap, explored, rm);
 
-    errs() << "Unsafe nodes of " << F->getGlobalIdentifier() << "\n";
+  LOG("fmap_unsafe", errs() << "Unsafe nodes of " << F->getGlobalIdentifier() << "\n";
     for (auto n : unsafeSAS) {
       n->dump();
       errs() << "\n";
-    }
+    });
   }
 
 void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,

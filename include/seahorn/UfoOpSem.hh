@@ -88,7 +88,7 @@ public:
   virtual void execCallSite(CallSiteInfo &csi, ExprVector &side, SymStore &s);
 };
 
-enum class ArrayOpt { IN, OUT };
+enum class MemOpt { IN, OUT };
 
 class MemUfoOpSem : public UfoOpSem {
 protected:
@@ -98,20 +98,23 @@ protected:
   // map to store the correspondence between node ids and their correspondent
   // expression
   using NodeIdMap = DenseMap<std::pair<const seadsa::Node *, unsigned>, Expr>;
+  // original arrays names of a cell
+  NodeIdMap m_orig_array_in;
+  NodeIdMap m_orig_array_out;
+  // current number to generate intermediate array names for the copies
+  int m_copy_count = 0;
+
+private:
   // array names to replace for a cell
   NodeIdMap m_rep_in;
   NodeIdMap m_rep_out;
+
   // for the intermediate arrays name for copies for a cell
   NodeIdMap m_tmprep_in;
   // this creates non-deterministic vcgen (iterating over it to replace the new
   // parameter names)
   NodeIdMap m_tmprep_out;
-  // original arrays names of a cell
-  NodeIdMap m_orig_array_in;
-  NodeIdMap m_orig_array_out;
 
-  // current number to generate intermediate array names for the copies
-  int m_copy_count = 0;
 
 public:
   MemUfoOpSem(ExprFactory &efac, Pass &pass, const DataLayout &dl,
@@ -139,28 +142,28 @@ protected:
                    ExprVector &side);
 
   // Internal methods to handle array expressions and cells.
-  void addCIArraySymbol(CallInst *CI, Expr A, ArrayOpt ao);
-  void addArraySymbol(const seadsa::Cell &c, Expr A, ArrayOpt ao);
-  Expr getOrigArraySymbol(const seadsa::Cell &c, ArrayOpt ao);
-  bool hasOrigArraySymbol(const seadsa::Cell &c, ArrayOpt ao);
+  void addCIArraySymbol(CallInst *CI, Expr A, MemOpt ao);
+  void addArraySymbol(const seadsa::Cell &c, Expr A, MemOpt ao);
+  Expr getOrigMemSymbol(const seadsa::Cell &c, MemOpt ao);
+  bool hasOrigArraySymbol(const seadsa::Cell &c, MemOpt ao);
   // creates a new array symbol for array origE if it was not created already
-  Expr getFreshArraySymbol(const seadsa::Cell &c, ArrayOpt ao);
-  // Expr getCurrArraySymbol(const Cell &c, ArrayOpt ao); // for encoding with
+  Expr getFreshArraySymbol(const seadsa::Cell &c, MemOpt ao);
+  // Expr getCurrArraySymbol(const Cell &c, MemOpt ao); // for encoding with
   // scalars
 
   // creates a new array symbol for intermediate copies of an original array
   // origE. currE is the current intermediate name and newE is the new value to
   // copy
   void newTmpArraySymbol(const seadsa::Cell &c, Expr &currE, Expr &newE,
-                         ArrayOpt ao);
+                         MemOpt ao);
 
   // processes the shadow mem instructions prior to a callsite to obtain the
   // expressions that correspond to each of the cells involved.
-  void processShadowMemsCallSite(CallSiteInfo &csi);
+  virtual void processShadowMemsCallSite(CallSiteInfo &csi);
 
 private:
-  NodeIdMap &getOrigMap(ArrayOpt ao) {
-    return ao == ArrayOpt::IN ? m_orig_array_in : m_orig_array_out;
+  NodeIdMap &getOrigMap(MemOpt ao) {
+    return ao == MemOpt::IN ? m_orig_array_in : m_orig_array_out;
   }
 };
 
@@ -187,15 +190,18 @@ struct InterMemStats {
 class FMapUfoOpSem : public MemUfoOpSem {
 
   // hides how the memory is split
-  using FMapExprMap = std::map<Expr, ExprVector>; // std::map??
-
-  // using NodeIdMap = DenseMap<std::pair<const sea_dsa::Node *, unsigned>,
-  // Expr>;
-
+  using FMapExprMap = std::map<Expr, ExprVector>;
+  // -- Expr needs to be replaced by a map with the keys in this std::map
   FMapExprMap m_fmKeys;
+  // -- Expr needs to be replaced by a map with the values in this std::map
   FMapExprMap m_fmValues;
 
-  // base for keys
+  // -- Additional store operations for the out memories (copy back)
+  ExprMap m_fmOut;
+  // -- Additional store operations for the out memories (copy back)
+  ExprMap m_replace;
+
+  // -- constant base for keys
   Expr m_keyBase;
 
 public:
@@ -210,22 +216,30 @@ public:
   Expr symb(const Value &v) override;
   void execCallSite(CallSiteInfo &CS, ExprVector &side, SymStore &s) override;
 
+protected:
+  void processShadowMemsCallSite(CallSiteInfo &csi) override;
+
+private:
   void VCgenArg(const Cell &cArgCallee, Expr basePtr,
-                NodeSet &unsafeCallerNodes, SimulationMapper &sm);
+                NodeSet &unsafeCallerNodes, SimulationMapper &sm,
+                const Function &F);
 
   void recVCGenMem(const Cell &c_callee, Expr ptrInt, Expr ptrOut,
                    NodeSet &unsafeNodes, SimulationMapper &simMap,
-                   NodeSet &explored);
+                   NodeSet &explored, const Function &F);
 
-private:
   Expr fmVariant(Expr e, const ExprVector &keys);
-  void addKeyVal(Cell c, Expr basePtr, Expr offset, ArrayOpt ao);
+  void addKeyVal(Cell c, Expr basePtr, Expr offset, MemOpt ao);
+  void storeVal(Cell c, Expr readFrom, Expr basePtr, Expr offset);
 
   // creates an ExprVector if not initialized already
   ExprVector &getExprKeys(Expr e) { return m_fmKeys[e]; }
   bool hasExprKeys(Expr e) { return m_fmKeys.count(e) > 0; }
   ExprVector &getExprValues(Expr e) { return m_fmValues[e]; }
-  Expr mkObtainValue(Expr mem, Expr offset);
+  Expr memObtainValue(Expr mem, Expr offset);
+  Expr memSetValue(Expr mem, Expr offset, Expr v);
+  Expr getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee, MemOpt ao,
+                         const Function &F);
 };
 
 } // namespace seahorn

@@ -336,10 +336,23 @@ bool HornifyModule::runOnModule(Module &M) {
   }
 
   // DEBUG: printing clauses
-  LOG(
-      "print_clauses", errs() << "------- PRINTING CLAUSE DB ------\n";
+  LOG("print_clauses", errs() << "------- PRINTING CLAUSE DB ------\n";
+      // for (auto &fdecl
+      //      : m_db.getRelations()) fdecl->dump();
       for (auto &cl
-           : m_db.getRules()) { cl.get()->dump(); });
+           : m_db.getRules()) cl.get()
+          ->dump(););
+
+  // DEBUG: type-check clauses after vcgen
+  LOG(
+      "HCDB_check_types",
+      TypeChecker tc;
+      for (auto &rule
+             : m_db.getRules()) {
+        if (tc.typeOf(rule.get()) == sort::errorTy(m_efac)) {
+          errs() << *tc.getErrorExp() << "\n";
+        }
+      });
 
   LOG("inter_mem_counters", if (InterProcMem) g_im_stats.print(););
 

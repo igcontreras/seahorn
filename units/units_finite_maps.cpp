@@ -660,10 +660,10 @@ Expr test_rules_map_args(HornClauseDB &db, ExprVector &keys) {
   Expr set = finite_map::set(mapA_var, k1, mk<PLUS>(get_mapA, mkInt(1, efac)));
   Expr foo3_decl = mkFun("foo3", foo1_types);
   Expr foo3_app = bind::fapp(foo3_decl, foo1_app_args); // reusing foo1_args
-  // cl3: foo(map, k1, x) :- map = set(mapA, k1, +(get(mapA, k1), 1)),
-  //                         bar(mapA).
+  // cl3: foo(map, k1, x) :- bar(mapA),
+  //                         map = set(mapA, k1, +(get(mapA, k1), 1)),
   Expr cl3 = boolop::limp(
-      mk<AND>(mk<EQ>(map_var, set), bind::fapp(bar_decl, mapA_var)), foo3_app);
+                          mk<AND>(bind::fapp(bar_decl, mapA_var), mk<EQ>(map_var, set)), foo3_app);
 
   db.registerRelation(foo1_decl);
   db.registerRelation(foo2_decl);

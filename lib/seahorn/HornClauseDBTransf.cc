@@ -91,33 +91,46 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
     tdb.registerRelation(newPredDecl); // register relation in transformed db
   }
 
+  TypeChecker tc;
   for (const auto &rule : db.getRules()) {
     const ExprVector &vars = rule.vars();
     ExprSet allVars(vars.begin(), vars.end());
     DagVisitCache dvc; // TODO: same for all the clauses?
     FiniteMapArgsVisitor fmav(allVars, predDeclTransf, efac);
 
-    // rewrites the rule head as an fapp
-    Expr newHead = visit(fmav, rule.head(), dvc);
-    Expr newUnifs = nullptr;
-    if (isOpX<AND>(newHead)) { // move unifs to body
-      newUnifs = newHead->left();
-      newHead = newHead->right();
-    } else
-      newUnifs = mk<TRUE>(efac);
+    Expr ruleE;
+    if (isOpX<TRUE>(rule.body()))
+      // HACK for the transformation (avoid simplification of implications)
+      ruleE = mk<IMPL>(rule.body(), rule.head());
+    else
+      ruleE = rule.get();
 
-    Expr newBody = visit(fmav, rule.body(), dvc);
+    Expr newRuleE = visit(fmav, ruleE, dvc);
     // LOG("fmap_transf_rule", errs() << "old rule:\n\t" << *rule.body()
     //                                << "\nnew rule:\n\t" << *newBody <<
     //                                "\n";);
     // errs() << "------- body:\n" << *rule.body() << "\n";
 
-    tdb.addRule(allVars, boolop::limp(mk<AND>(newUnifs, newBody), newHead));
+    HornRule newRule(allVars, newRuleE);
+
+    LOG(
+        "fmap_check_types", errs() << "Transforming: " << *rule.get() << "\n";
+        if (tc.typeOf(rule.get()) == sort::errorTy(efac)) {
+          errs() << *tc.getErrorExp() << "\n";
+        } errs()
+        << "Transformed: " << *newRule.get() << "\n";
+        if (tc.typeOf(newRule.get()) == sort::errorTy(efac)) {
+          errs() << *tc.getErrorExp() << "\n";
+        });
+
+    tdb.addRule(newRule);
   }
 
   // copy queries
   for (auto &q : db.getQueries())
     tdb.addQuery(q);
+
+  errs() << "HCDB no args maps" << tdb << "\n";
 
   // Remove Finite Maps from Bodies
   std::vector<HornRule> worklist;
@@ -137,21 +150,25 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
       return !isOpX<FINITE_MAP_TY>(bind::rangeTy(bind::fname(expr)));
     });
 
-    HornRule new_rule(newVars, rule.head(), body);
+    HornRule newRule(newVars, rule.head(), body);
 
-    // errs() << *rule.get() << "\n";
-    // errs() << *new_rule.get() << "\n";
+    LOG(
+        "fmap_check_types", errs() << "Transforming: " << *rule.get() << "\n";
+        if (tc.typeOf(rule.get()) == sort::errorTy(efac)) {
+          errs() << *tc.getErrorExp() << "\n";
+        } errs()
+        << "Transformed: " << *newRule.get() << "\n";
+        if (tc.typeOf(newRule.get()) == sort::errorTy(efac)) {
+          errs() << *tc.getErrorExp() << "\n";
+        });
 
     tdb.removeRule(rule);
-    tdb.addRule(new_rule);
+    tdb.addRule(newRule);
   }
 
-  LOG(
-      "print_clauses", errs() << "------- TRANSFORMED CLAUSE DB ------\n";
+  LOG("print_clauses", errs() << "------- TRANSFORMED CLAUSE DB ------\n";
       for (auto &cl
-           : tdb.getRules()) { cl.get()->dump(); });
+             : tdb.getRules()) cl.get()->dump(););
 }
-
-void myDump(Expr e) { e->dump(); }
 
 } // namespace seahorn

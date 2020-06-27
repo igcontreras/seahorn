@@ -169,6 +169,13 @@ inline Expr constFiniteMap(const ExprVector &keys, const ExprVector &values) {
                               constFiniteMapValues(values));
 }
 
+inline bool isInitializedFiniteMap(Expr m) {
+  if(isOpX<CONST_FINITE_MAP>(m))
+    return isOpX<CONST_FINITE_MAP_VALUES>(m);
+
+  return false;
+}
+
 inline Expr get(Expr map, Expr idx) { return mk<GET>(map, idx); }
 inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
 

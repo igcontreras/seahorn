@@ -51,7 +51,6 @@ public:
    */
   bool runOnModule(llvm::Module &M);
 
-  // add methods to test if the sets were created
   NodeSet &getUnsafeNodesCallerCS(const Instruction *I);
   NodeSet &getUnsafeNodesCalleeCS(const Instruction *I);
 
@@ -76,10 +75,18 @@ public:
     assert(m_frm.count(f) > 0);
     return m_frm[f][n];
   }
+  unsigned getNumCIAccessesSummaryNode(const Node *n, const Function *f) {
+    assert(m_smF.count(f) > 0);
+    SimulationMapper &sm = m_smF[f];
+    const Cell nCI = sm.get(*n);
+    assert(nCI.getNode() != nullptr);
 
-private:
-  void recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
-                      SimulationMapper &simMap, NodeSet &explored,
-                      RegionsMap &rm);
-};
+    return getNumAccesses(nCI.getNode(), f);
+  }
+
+  private:
+    void recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
+                        SimulationMapper &simMap, NodeSet &explored,
+                        RegionsMap &rm);
+  };
 } // namespace seahorn
