@@ -22,15 +22,18 @@ struct FMapExprsInfo {
   ExprSet &m_vars;
   // -- to cache the type of a map expr
   ExprMap &m_type;
-  // -- to cache the lambda expr generated for the keys a map type
+  // -- to cache the lambda expr generated for the keys of a map type
   ExprMap &m_typeLmd;
-  ExprMap &m_fmapVarDef;
+  // -- to cache the keys definition of a map expression
+  ExprMap &m_fmapDefk;
+
+  ExprMap &m_fmapVarTransf;
   ExprFactory &m_efac;
 
   FMapExprsInfo(ExprSet &vars, ExprMap &types, ExprMap &type_lmds,
-                ExprMap &fmapVarDef, ExprFactory &efac)
-      : m_vars(vars), m_type(types), m_typeLmd(type_lmds),
-        m_fmapVarDef(fmapVarDef), m_efac(efac) {}
+                ExprMap &fmapDefk, ExprMap &fmapVarTransf, ExprFactory &efac)
+      : m_vars(vars), m_type(types), m_typeLmd(type_lmds), m_fmapDefk(fmapDefk),
+        m_fmapVarTransf(fmapVarTransf), m_efac(efac) {}
 };
 
 // Rewrites a finite map operation to remove finite map terms. The arguments
@@ -43,8 +46,8 @@ class FiniteMapRewriter : public std::unary_function<Expr, Expr> {
 
 public:
   FiniteMapRewriter(ExprSet &evars, ExprMap &expr_type, ExprMap &type_lambda,
-                    ExprMap &fmapVarDef, ExprFactory &efac)
-      : m_fmei(evars, expr_type, type_lambda, fmapVarDef, efac){};
+                    ExprMap &fmapDef, ExprMap &fmapVarDef, ExprFactory &efac)
+      : m_fmei(evars, expr_type, type_lambda, fmapDef, fmapVarDef, efac){};
 
   Expr operator()(Expr exp);
 };
@@ -71,13 +74,14 @@ class FiniteMapBodyVisitor : public std::unary_function<Expr, VisitAction> {
 private:
   ExprMap m_types;
   ExprMap m_map_lambda;
+  ExprMap m_fmapDef;
   ExprMap m_fmapVarDef;
   std::shared_ptr<FiniteMapRewriter> m_rw;
 
 public:
   FiniteMapBodyVisitor(ExprSet &evars, ExprFactory &efac) {
     m_rw = std::make_shared<FiniteMapRewriter>(evars, m_types, m_map_lambda,
-                                               m_fmapVarDef, efac);
+                                               m_fmapDef, m_fmapVarDef, efac);
   }
 
   VisitAction operator()(Expr exp);

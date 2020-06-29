@@ -217,7 +217,7 @@ inline Expr mkKeys(const ExprVector &keys, ExprFactory &efac) {
   return lmdTmp;
 }
 
-// creates a map for keys and values, assuming that they are sorted
+// \brief creates a map for keys and values, assuming that they are sorted
 inline Expr mkInitializedMap(const ExprVector &keys, Expr vTy,
                              const ExprVector &values, const Expr lmdKeys,
                              ExprFactory &efac) {

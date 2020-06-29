@@ -269,6 +269,18 @@ void InterMemPreProc::preprocFunction(const Function *F) {
     });
   }
 
+unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
+                                                        const Function *f) {
+    assert(m_smF.count(f) > 0);
+    SimulationMapper &sm = m_smF[f];
+    errs() << "Callee cell: " << c << "\n";
+    sm.write(errs());
+    const Cell nCI = sm.get(c);
+    assert(nCI.getNode() != nullptr);
+
+    return getNumAccesses(nCI.getNode(), f);
+  }
+
 void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
                                      SimulationMapper &simMap,
                                      NodeSet &explored, RegionsMap &rm) {

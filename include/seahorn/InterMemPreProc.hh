@@ -75,15 +75,8 @@ public:
     assert(m_frm.count(f) > 0);
     return m_frm[f][n];
   }
-  unsigned getNumCIAccessesSummaryNode(const Node *n, const Function *f) {
-    assert(m_smF.count(f) > 0);
-    SimulationMapper &sm = m_smF[f];
-    const Cell nCI = sm.get(*n);
-    assert(nCI.getNode() != nullptr);
 
-    return getNumAccesses(nCI.getNode(), f);
-  }
-
+  unsigned getNumCIAccessesCellSummary(const Cell &c, const Function *f);
   private:
     void recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
                         SimulationMapper &simMap, NodeSet &explored,
