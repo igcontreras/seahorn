@@ -149,6 +149,10 @@ inline Expr constFiniteMapValues(const ExprVector &values) {
   return mknary<CONST_FINITE_MAP_VALUES>(values.begin(), values.end());
 }
 
+inline Expr constFiniteMapDefault(Expr def) {
+  return mk<FINITE_MAP_VAL_DEFAULT>(def);
+}
+
 inline Expr constFiniteMapKeys(const ExprVector &keys) {
   assert(keys.size() > 0);
   return mknary<CONST_FINITE_MAP_KEYS>(keys.begin(), keys.end());
@@ -156,22 +160,36 @@ inline Expr constFiniteMapKeys(const ExprVector &keys) {
 
 // \brief builds an empty map term. `e` is the default for the unitialized
 // values
-inline Expr constFiniteMap(const ExprVector &keys, Expr e) {
+inline Expr constFiniteMap(const ExprVector &keys, Expr def) {
   return mk<CONST_FINITE_MAP>(constFiniteMapKeys(keys),
-                              mk<FINITE_MAP_VAL_DEFAULT>(e));
+                              constFiniteMapDefault(def));
 }
 
 // construct when ALL the values of the map are known (they can be
 // variables)
-inline Expr constFiniteMap(const ExprVector &keys, const ExprVector &values) {
+inline Expr constFiniteMap(const ExprVector &keys,
+                           Expr def, const ExprVector &values) {
   assert(keys.size() == values.size());
   return mk<CONST_FINITE_MAP>(constFiniteMapKeys(keys),
+                              constFiniteMapDefault(def),
                               constFiniteMapValues(values));
+}
+
+inline Expr fmapDefKeys(Expr fmap) { return fmap->left(); }
+
+inline Expr fmapDefDefault(Expr fmap) {
+  assert(isOpX<FINITE_MAP_VAL_DEFAULT>(fmap->right()));
+  return fmap->right();
+}
+
+inline Expr fmapDefValues(Expr fmap) {
+  assert(isOpX<CONST_FINITE_MAP_VALUES>(fmap->last()));
+  return fmap->last();
 }
 
 inline bool isInitializedFiniteMap(Expr m) {
   if(isOpX<CONST_FINITE_MAP>(m))
-    return isOpX<CONST_FINITE_MAP_VALUES>(m);
+    return isOpX<CONST_FINITE_MAP_VALUES>(m->last());
 
   return false;
 }

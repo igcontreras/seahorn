@@ -140,9 +140,6 @@ bool InterMemPreProc::runOnModule(Module &M) {
         if (!ga.hasSummaryGraph(*f_callee))
           continue;
 
-        LOG("inter_mem_preproc",
-            errs() << "Preprocessing " << f_caller->getGlobalIdentifier(););
-
         ColorMap color_callee, color_caller;
         NodeSet f_node_safe;
 
@@ -158,40 +155,18 @@ bool InterMemPreProc::runOnModule(Module &M) {
                                           *(const_cast<Graph *>(&callerG)),
                                           simMap);
 
-        // errs() << "callee:\n";
-        // fromG.dump();
-        // errs() << "caller:\n";
-        // callerG.dump();
-
-        NodeSet &unsafeCallee = getUnsafeNodesCalleeCS(I);
-        NodeSet &unsafeCaller = getUnsafeNodesCallerCS(I);
-        NodeSet &unsafeCalleeCI = getUnsafeNodes(f_callee);
-
+        NodeSet &unsafeCallee = getUnsafeNodesCalleeCS(I); // creates it
+        NodeSet &unsafeCaller = getUnsafeNodesCallerCS(I); // creates it
         computeUnsafeNodesSimulation(*(const_cast<Graph *>(&fromG)), *f_callee,
                                      unsafeCallee, unsafeCaller, simMap);
-
-        // errs() << "Unsafe nodes callee:\n";
-        // for (auto n : unsafeCallee) {
-        //   n->dump();
-        //   errs() << "\n";
-        //   if (!unsafeCalleeCI.count(n))
-        //     unsafeCalleeCI.insert(n);
-        //   // Node * n = simMap.get()
-        //   //   unsafeCaller.insert
-        // }
-
-        // errs() << "Unsafe nodes caller:\n";
-        // for (auto n : unsafeCaller) {
-        //   n->dump();
-        //   errs() << "\n";
-        // }
       }
     }
   }
 
-  // this includes auxiliary functions, how do I get the original written by the user?
-  for (const Function & f : M)
-    if(ga.hasSummaryGraph(f))
+  // this includes auxiliary functions, how do I get the original written by the
+  // user?
+  for (const Function &f : M)
+    if (ga.hasSummaryGraph(f))
       preprocFunction(&f);
 
   return false;
@@ -220,15 +195,12 @@ bool InterMemPreProc::isSafeNodeFunc(const Node &n, const Function *f) {
 
 void InterMemPreProc::preprocFunction(const Function *F) {
 
-  errs() << "-------- Preprocessing " << F->getGlobalIdentifier() << "\n";
-
   GlobalAnalysis &ga = m_shadowDsa.getDsaAnalysis();
 
   Graph &buG = ga.getSummaryGraph(*F);
   const Graph &sasG = ga.getGraph(*F);
 
-  // creates the SimulationMapper object
-  SimulationMapper &simMap = m_smF[F];
+  SimulationMapper &simMap = m_smF[F]; // creates the SimulationMapper object
 
   bool simulated = Graph::computeSimulationMapping(
       *(const_cast<Graph *>(&buG)), *(const_cast<Graph *>(&sasG)), simMap);
@@ -253,33 +225,26 @@ void InterMemPreProc::preprocFunction(const Function *F) {
     recProcessNode(c, unsafeSAS, simMap, explored, rm);
   }
 
-  // TODO: replace by a flag, uncomment to get rid of as many arrays as possible
-  LOG("fmap_scalars", for (auto &kv : buG.scalars()) {
-    Cell &c = *kv.second;
-    recProcessNode(c, unsafeSAS, simMap, explored, rm);
-    });
+  // TODO: uncomment to get rid of as many arrays as possible
+  LOG(
+      "fmap_scalars", for (auto &kv
+                           : buG.scalars()) {
+        Cell &c = *kv.second;
+        recProcessNode(c, unsafeSAS, simMap, explored, rm);
+      });
 
   if (buG.hasRetCell(*F))
     recProcessNode(buG.getRetCell(*F), unsafeSAS, simMap, explored, rm);
-
-  LOG("fmap_unsafe", errs() << "Unsafe nodes of " << F->getGlobalIdentifier() << "\n";
-    for (auto n : unsafeSAS) {
-      n->dump();
-      errs() << "\n";
-    });
-  }
+}
 
 unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
-                                                        const Function *f) {
-    assert(m_smF.count(f) > 0);
-    SimulationMapper &sm = m_smF[f];
-    errs() << "Callee cell: " << c << "\n";
-    sm.write(errs());
-    const Cell nCI = sm.get(c);
-    assert(nCI.getNode() != nullptr);
+                                                      const Function *f) {
+  assert(m_smF.count(f) > 0);
+  SimulationMapper &sm = m_smF[f];
+  const Cell nCI = sm.get(c);
 
-    return getNumAccesses(nCI.getNode(), f);
-  }
+  return getNumAccesses(nCI.getNode(), f);
+}
 
 void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
                                      SimulationMapper &simMap,

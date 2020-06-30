@@ -1642,7 +1642,8 @@ Expr FMapUfoOpSem::symb(const Value &I) {
           Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
           LOG("fmap_symb",
               errs() << "       " << *sort::finiteMapTy(intTy, keys) << "\n";);
-          // errs() << *v << " in " << F->getGlobalIdentifier() << " of sort : \n "
+          // errs() << *v << " in " << F->getGlobalIdentifier() << " of sort :
+          // \n "
           //        << *sort::finiteMapTy(intTy, keys) << "\n";
 
           return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
@@ -1673,11 +1674,10 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
   // associates cells in the caller graph with its exprs
   MemUfoOpSem::processShadowMemsCallSite(csi);
+  // TODO: review FMapUfoOpSem::processShadowMemsCallSite
 
   CallSite &CS = csi.m_cs;
   Graph &calleeG = ga.getSummaryGraph(*calleeF);
-
-  calleeG.dump();
 
   NodeSet &unsafeNodesCaller =
       m_preproc->getUnsafeNodesCallerCS(CS.getInstruction());
@@ -1686,7 +1686,8 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   for (const Argument *arg : fi.args) {
     Expr argE = s.read(symb(*CS.getArgument(arg->getArgNo())));
     if (calleeG.hasCell(*arg)) // checking that the argument is a pointer
-      VCgenArg(calleeG.getCell(*arg), argE, unsafeNodesCaller, simMap, *calleeF);
+      VCgenArg(calleeG.getCell(*arg), argE, unsafeNodesCaller, simMap,
+               *calleeF);
     csi.m_fparams.push_back(argE);
   }
 
@@ -1711,23 +1712,17 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   for (int i = 3; i < csi.m_fparams.size(); i++) {
     Expr param = csi.m_fparams[i];
     if (hasExprKeys(param)) {
-
-      const ExprVector &keys = getExprKeys(param);
       assert(m_fmValues.count(param) > 0);
 
-      const ExprVector &values = getExprValues(param);
-
       Expr fmap = m_replace[param];
+      // add map definition
+      side.push_back(mk<EQ>(
+          fmap, finite_map::constFiniteMap(getExprKeys(param), m_fmapDefault,
+                                           getExprValues(param))));
+      csi.m_fparams[i] = fmap; // replace mem param
 
-      // map definition
-      side.push_back(mk<EQ>(fmap, finite_map::constFiniteMap(keys, values)));
-      // new map param
-      csi.m_fparams[i] = fmap;
-
-      errs() << "\t" << *param << " : replaced by \n ";
-      errs() << "\t    " << *fmap << "\n";
-    } else {
-      errs() << "\t" << *param << ": Not copiable or not a mem region\n";
+      LOG("fmap_opsem", errs() << "\t" << *param << " : replaced by \n "
+                               << "\t    " << *fmap << "\n";);
     }
   }
 
@@ -1739,7 +1734,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   assert(csi.m_fparams.size() == bind::domainSz(fi.sumPred));
   side.push_back(bind::fapp(fi.sumPred, csi.m_fparams));
 
-  // store back back in local variables
+  // store back back in caller variables
   for (auto e_pair : m_replace)
     if (m_fmOut.count(e_pair.first) > 0) // if it is an output mem symbol
       side.push_back(mk<EQ>(e_pair.first, m_fmOut[e_pair.first]));
@@ -1755,7 +1750,6 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
 Expr FMapUfoOpSem::fmVariant(Expr e, const ExprVector &keys) {
 
-  assert(e);
   assert(keys.size() > 0);
 
   Expr name = bind::fname(e);
@@ -1789,25 +1783,22 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
   if (!c_callee.getNode()->types().empty() &&
       m_preproc->isSafeNode(unsafeNodes, n_caller)) {
 
+    // -- copy accessed fields of the node
     for (auto field : c_callee.getNode()->types()) {
       unsigned offset = field.getFirst();
+      Expr eOffset = mkTerm<expr::mpz_class>(offset, m_efac);
 
       Cell c_caller_field(c_caller, offset);
       Cell c_callee_field(c_callee, offset);
-
-      // create a new name for that array if it was not created
-      Expr eOffset = mkTerm<expr::mpz_class>(offset, m_efac);
 
       if (hasOrigArraySymbol(c_caller_field, MemOpt::IN)) {
         // force creation of a new mem symbol for later
         getFreshMapSymbol(c_caller_field, c_callee_field, MemOpt::IN, F);
         addKeyVal(c_caller_field, basePtrIn, eOffset, MemOpt::IN);
       }
-
       if (hasOrigArraySymbol(c_caller_field, MemOpt::OUT)) {
-        // addKeyVal(c_caller_field, basePtrIn, eOffset, MemOpt::OUT);
         Expr readFrom =
-          getFreshMapSymbol(c_caller_field, c_callee_field, MemOpt::OUT, F);
+            getFreshMapSymbol(c_caller_field, c_callee_field, MemOpt::OUT, F);
         storeVal(c_caller_field, readFrom, basePtrOut, eOffset);
       }
     }
@@ -1816,7 +1807,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
   if (n_callee->getLinks().empty())
     return;
 
-  // follow the pointers of the node
+  // -- follow the pointers of the node
   for (auto &links : n_callee->getLinks()) {
     const Field &f = links.first;
     const Cell &next_c = *links.second;
@@ -1824,7 +1815,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
 
     const Cell nextCaller(c_caller, f.getOffset());
 
-    Expr origIn = getOrigMemSymbol(nextCaller, MemOpt::IN);
+    Expr origIn = getOrigMemSymbol(nextCaller, MemOpt::IN); // TODO: review for output mem
     Expr origOut = hasOrigArraySymbol(nextCaller, MemOpt::OUT)
                        ? getOrigMemSymbol(nextCaller, MemOpt::OUT)
                        : origIn;
@@ -1843,7 +1834,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
 // \brief obtains the value of an offset of an expr that represents a memory
 // region (looking at the type)
 Expr FMapUfoOpSem::memObtainValue(Expr mem, Expr offset) {
-  if (bind::isArrayConst(mem))
+  if (bind::isArrayConst(mem) || isOpX<STORE>(mem))
     return op::array::select(mem, offset);
   else
     return op::finite_map::get(mem, offset);
@@ -1887,11 +1878,11 @@ void FMapUfoOpSem::storeVal(Cell c, Expr readFrom, Expr basePtr, Expr offset) {
   m_fmOut[out] = memSetValue(storeAt, dir, value); // additional stores
 
   getExprKeys(out).push_back(dir); // for the definition
-  getExprValues(out).push_back(bind::intConst(variant::variant(0,value)));
-                               // we don't care about this variable, it will
-                               // only appear once in the body, we are creating
-                               // this map definition only to unify the keys
-                               // later
+  getExprValues(out).push_back(bind::intConst(variant::variant(0, value)));
+  // we don't care about this variable, it will
+  // only appear once in the body, we are creating
+  // this map definition only to unify the keys
+  // later
 }
 
 Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee,

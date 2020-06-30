@@ -1463,7 +1463,7 @@ TEST_CASE("finiteMapWellFormed.test") {
 
   vals.push_back(aInt);
   vals.push_back(bInt);
-  temp = finite_map::constFiniteMap(keys, vals);
+  temp = finite_map::constFiniteMap(keys, vals[0], vals);
   e.push_back(temp);
 
   Expr finiteMapSort2 = sort::finiteMapTy(intSort, keys);
@@ -1478,8 +1478,13 @@ TEST_CASE("finiteMapWellFormed.test") {
   checkWellFormed(e, intSort);
   e.clear();
 
-  temp = finite_map::constFiniteMap(keys, vals);
+  temp = finite_map::constFiniteMap(keys, vals[0], vals);
   temp = mk<SET>(temp, bIntKey, aInt);
+  e.push_back(temp);
+
+  Expr map_var =
+      bind::mkConst(expr::mkTerm<std::string>("m1", efac), finiteMapSort2);
+  temp = mk<EQ>(map_var, mk<SET>(temp, aIntKey, aInt));
   e.push_back(temp);
 
   checkWellFormed(e, finiteMapSort2);
@@ -1541,7 +1546,7 @@ TEST_CASE("finiteMapNotWellFormed.test") {
   vals.clear();
   vals.push_back(aInt);
   tempError = finite_map::constFiniteMap(
-      keys, vals); // keys and vals are of different sizes
+                                         keys, vals[0], vals); // keys and vals are of different sizes
   error.push_back(tempError);
   e.push_back(tempError);
 
@@ -1555,17 +1560,17 @@ TEST_CASE("finiteMapNotWellFormed.test") {
   vals.clear();
   vals.push_back(aInt);
   vals.push_back(bInt);
-  tempError = mk<SET>(finite_map::constFiniteMap(keys, vals), aIntKey,
+  tempError = mk<SET>(finite_map::constFiniteMap(keys, vals[0], vals), aIntKey,
                       aInt); // key type does not match the maps key type
   error.push_back(tempError);
   e.push_back(tempError);
 
-  tempError = mk<SET>(finite_map::constFiniteMap(keys, vals), aBoolKey,
+  tempError = mk<SET>(finite_map::constFiniteMap(keys, vals[0], vals), aBoolKey,
                       aBool); // val type does not match the maps key type
   error.push_back(tempError);
   e.push_back(tempError);
 
-  tempError = mk<GET>(finite_map::constFiniteMap(keys, vals),
+  tempError = mk<GET>(finite_map::constFiniteMap(keys, vals[0], vals),
                       aIntKey); // key type does not match the maps key type
   error.push_back(tempError);
   e.push_back(tempError);

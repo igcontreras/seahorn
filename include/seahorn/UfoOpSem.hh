@@ -115,7 +115,6 @@ private:
   // parameter names)
   NodeIdMap m_tmprep_out;
 
-
 public:
   MemUfoOpSem(ExprFactory &efac, Pass &pass, const DataLayout &dl,
               std::shared_ptr<InterMemPreProc> preproc,
@@ -203,6 +202,8 @@ class FMapUfoOpSem : public MemUfoOpSem {
 
   // -- constant base for keys
   Expr m_keyBase;
+  // -- default value for uninitialized values of maps
+  Expr m_fmapDefault;
 
 public:
   FMapUfoOpSem(expr::ExprFactory &efac, Pass &pass, const DataLayout &dl,
@@ -211,6 +212,7 @@ public:
                FunctionPtrSet abs_fns = FunctionPtrSet(), ShadowMem *dsa = NULL)
       : MemUfoOpSem(efac, pass, dl, preproc, trackLvl, abs_fns, dsa) {
     m_keyBase = mkTerm<std::string>("k", efac);
+    m_fmapDefault = mkTerm<expr::mpz_class>(0UL, m_efac);
   }
 
   Expr symb(const Value &v) override;

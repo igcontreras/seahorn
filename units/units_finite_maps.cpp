@@ -31,7 +31,12 @@ static Expr mkBvKey(unsigned n, unsigned width, ExprFactory &efac) {
 static Expr mkFMapConstInt(const std::string name, const ExprVector keys) {
   ExprFactory &efac = keys.at(0)->efac();
   Expr finiteMapTy = sort::finiteMapTy(sort::intTy(efac), keys);
-  return bind::mkConst(mkTerm(name, efac), finiteMapTy);
+  Expr fmconst = bind::mkConst(mkTerm(name, efac), finiteMapTy);
+
+  bind::IsConst ic;
+
+  CHECK(ic(fmconst));
+  return fmconst;
 }
 
 // -- version with the ExprVector by value so that the initialization with {}
@@ -236,7 +241,7 @@ TEST_CASE("expr.finite_map.get_after_mkSetVal") {
 
   EZ3 z3(efac);
 
-  errs() << "map: " << *map << "\n";
+  errs() << "map: " << *get_value << "\n";
   errs() << "Simplified: " << *z3_simplify(z3, get_value) << "\n";
 
   CHECK(boost::lexical_cast<std::string>(
@@ -256,7 +261,8 @@ TEST_CASE("expr.finite_map.mkInitializedMap") {
   Expr lmdValues = finite_map::mkInitializedMap(keys, sort::intTy(efac), values,
                                                 lmdKeys, efac);
 
-  Expr u_map = finite_map::constFiniteMap(keys, values); // uninterpreted map
+  Expr u_map =
+      finite_map::constFiniteMap(keys, values[0], values); // uninterpreted map
 
   errs() << "lmdKeys:    " << *lmdValues << "\n\n";
   errs() << "lmdValues:    " << *lmdValues << "\n\n";
@@ -663,7 +669,7 @@ Expr test_rules_map_args(HornClauseDB &db, ExprVector &keys) {
   // cl3: foo(map, k1, x) :- bar(mapA),
   //                         map = set(mapA, k1, +(get(mapA, k1), 1)),
   Expr cl3 = boolop::limp(
-                          mk<AND>(bind::fapp(bar_decl, mapA_var), mk<EQ>(map_var, set)), foo3_app);
+      mk<AND>(bind::fapp(bar_decl, mapA_var), mk<EQ>(map_var, set)), foo3_app);
 
   db.registerRelation(foo1_decl);
   db.registerRelation(foo2_decl);
@@ -696,8 +702,9 @@ Expr test_rules_map_args(HornClauseDB &db, ExprVector &keys) {
   }
 
   ExprVector qargs = {mapVar, keys[0], v};
-  ExprVector qBody = {mk<EQ>(mapVar, finite_map::constFiniteMap(keys, values)),
-                      bind::fapp(foo2_decl, qargs), mk<NEQ>(v, solution)};
+  ExprVector qBody = {
+      mk<EQ>(mapVar, finite_map::constFiniteMap(keys, values[0], values)),
+      bind::fapp(foo2_decl, qargs), mk<NEQ>(v, solution)};
 
   ExprSet vars(qargs.begin(), qargs.end());
   for (auto it : keys)

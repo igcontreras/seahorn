@@ -53,7 +53,8 @@ int main() {
   init_list(&l2);
 
   sea_dsa_alias(&l1,&l2); // comment this line to converge
-  assume(&l1 + sizeof(List) + 100 < &l2);
+  assume(&l1 + sizeof(List) < &l2);
+  // this assume is needed for unsat, is there an option to make it automatic?
 
   push_elem(&l2, 42);
 
