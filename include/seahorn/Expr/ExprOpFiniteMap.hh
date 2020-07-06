@@ -312,7 +312,7 @@ inline Expr mkSetVal(Expr lmdMap, Expr lmdKeys, Expr key, Expr value,
 }
 
 // \brief expands the map types of fdecls into separate scalar variables
-inline Expr mkMapsDecl(Expr fdecl, ExprFactory &efac) {
+inline Expr mkMapsDecl(Expr fdecl) {
 
   assert(isOpX<FDECL>(fdecl));
 

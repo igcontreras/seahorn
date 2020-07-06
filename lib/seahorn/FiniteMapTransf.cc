@@ -2,7 +2,7 @@
 
 #include "seahorn/Expr/ExprCore.hh"
 #include "seahorn/Expr/ExprOpBind.hh"
-#include "seahorn/Expr/ExprVisitor.hh"
+#include "seahorn/Expr/ExprOpFiniteMap.hh"
 
 #include "seahorn/Support/SeaDebug.h"
 
@@ -103,7 +103,7 @@ VisitAction FiniteMapArgsVisitor::operator()(Expr exp) {
     ExprVector newUnifs;
     Expr newFapp = mkFappArgsCore(head, newPredDecl, newUnifs, m_evars, m_efac);
     Expr newBody =
-        newUnifs.empty() ? body : mk<AND>(mknary<AND>(newUnifs), body);
+        newUnifs.empty() ? body : boolop::land(boolop::land(newUnifs), body);
 
     Expr newExp = boolop::limp(newBody, newFapp);
     // efficiency: are we traversing the newly created unifs?
@@ -117,7 +117,8 @@ VisitAction FiniteMapArgsVisitor::operator()(Expr exp) {
       Expr newPredDecl = m_pred_decl_t.find(fdecl)->second;
       Expr newExp = mkFappArgsCore(exp, newPredDecl, newUnifs, m_evars, m_efac);
       if (!newUnifs.empty())
-        newExp = mk<AND>(mknary<AND>(newUnifs), newExp);
+        newUnifs.push_back(newExp);
+        newExp = boolop::land(newUnifs);
       LOG("fmap_transf", errs() << *newExp << "\n";);
       return VisitAction::changeDoKids(newExp);
     }
@@ -240,7 +241,7 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
     conj.push_back(mk<EQ>(getValueAtDef(ml, lksl, mlDefk->arg(i), i),
                           getValueAtDef(mr, lksr, mrDefk->arg(i), i)));
   }
-  return mknary<AND>(conj);
+  return boolop::land(conj);
 }
 
 // -- processes a fmap definition, building the type and the lmdkeys

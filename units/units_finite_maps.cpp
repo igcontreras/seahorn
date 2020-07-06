@@ -570,7 +570,7 @@ TEST_CASE("expr.finite_map.fmap_fdecl") {
   Expr fdecl = mkFun("mrel", {finiteMapTy1, finiteMapTy2, sort::boolTy(efac)});
   errs() << "fdecl: " << *fdecl << "\n";
 
-  Expr fdeclT = finite_map::mkMapsDecl(fdecl, efac);
+  Expr fdeclT = finite_map::mkMapsDecl(fdecl);
 
   CHECK(fdeclT != nullptr);
   CHECK(fdeclT != fdecl);
@@ -582,7 +582,7 @@ TEST_CASE("expr.finite_map.no_fmap_fdecl") {
   ExprFactory efac;
   Expr fdecl = mkFun(
       "nofmap", {sort::intTy(efac), sort::realTy(efac), sort::boolTy(efac)});
-  Expr fdeclT = finite_map::mkMapsDecl(fdecl, efac);
+  Expr fdeclT = finite_map::mkMapsDecl(fdecl);
 
   CHECK(fdeclT != nullptr);
   CHECK(fdeclT == fdecl);
@@ -600,7 +600,7 @@ TEST_CASE("expr.finite_map.clause_rewriter") {
                       {bind::rangeTy(bind::fname(map1)), sort::boolTy(efac)});
 
   ExprMap predtransf;
-  predtransf[fdecl1] = finite_map::mkMapsDecl(fdecl1, efac);
+  predtransf[fdecl1] = finite_map::mkMapsDecl(fdecl1);
 
   Expr fapp1 = bind::fapp(fdecl1, {map1});
   Expr newE = visit_args({map1}, efac, fapp1, predtransf);

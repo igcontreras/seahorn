@@ -1,7 +1,20 @@
 #include "seahorn/HornClauseDBTransf.hh"
+
+#include "seahorn/Expr/ExprOpFiniteMap.hh"
 #include "seahorn/FiniteMapTransf.hh"
 
+// to simplify
+#include "seahorn/Expr/Smt/EZ3.hh"
+
+#include "seahorn/Expr/TypeChecker.hh"
+
 #include "seahorn/Support/SeaDebug.h"
+#include "llvm/Support/CommandLine.h"
+
+static llvm::cl::opt<bool>
+FmapSimplify("horn-fmap-simp",
+             llvm::cl::desc("Simplify after removal of finite maps"),
+             llvm::cl::init(false));
 
 namespace seahorn {
 using namespace expr;
@@ -83,7 +96,7 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
       newPredDecl = predIt;
     else {
       // create new relation declaration
-      newPredDecl = finite_map::mkMapsDecl(predIt, efac);
+      newPredDecl = finite_map::mkMapsDecl(predIt);
 
       if (newPredDecl != predIt)
         predDeclTransf[predIt] = newPredDecl;
@@ -100,7 +113,7 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
 
     Expr ruleE;
     if (isOpX<TRUE>(rule.body()))
-      // HACK for the transformation (avoid simplification of implications)
+      // HACK for the transformation (force not simplifying implication)
       ruleE = mk<IMPL>(rule.body(), rule.head());
     else
       ruleE = rule.get();
@@ -169,6 +182,30 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
   LOG("print_clauses", errs() << "------- TRANSFORMED CLAUSE DB ------\n";
       for (auto &cl
              : tdb.getRules()) cl.get()->dump(););
+
+  if (FmapSimplify) {
+
+    EZ3 z3(efac);
+
+    std::vector<HornRule> worklist;
+    boost::copy(tdb.getRules(), std::back_inserter(worklist));
+
+    for (auto rule : worklist) {
+
+      const ExprVector &rvars = rule.vars();
+      ExprSet simpVars(rvars.begin(), rvars.end());
+
+      tdb.removeRule(rule);
+
+      Expr simpRule = z3_simplify(z3, rule.get());
+      // ExprSet simpVars;
+      // expr::filter(simpRule, bind::IsConst(),
+      //              std::inserter(simpVars, simpVars.begin()));
+
+      // TODO: remove vars that aren't present in the simplified rule?
+      tdb.addRule(simpVars, simpRule);
+    }
+  }
 }
 
 } // namespace seahorn

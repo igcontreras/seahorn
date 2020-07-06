@@ -3,7 +3,6 @@
 #include "seahorn/Expr/Expr.hh"
 #include "seahorn/Expr/ExprCore.hh"
 #include "seahorn/Expr/ExprOpBind.hh"
-#include "seahorn/Expr/ExprOpFiniteMap.hh"
 #include "seahorn/Expr/ExprVisitor.hh"
 #include "seahorn/HornClauseDB.hh"
 #include "seahorn/HornModelConverter.hh"
@@ -90,31 +89,4 @@ private:
   bool isVisitFiniteMapOp(Expr e);
 };
 
-// TODO: this converts the output of z3 back to the original clauses
-// with maps
-class FiniteMapHornModelConverter : public HornModelConverter {
-private:
-  // std::map<Expr, ExprMap> m_relToBoolToTermMap;
-  // std::map<Expr, Expr> m_newToOldPredMap;
-  HornClauseDB *m_abs_db;
-
-  // std::map<Expr, ExprMap> &getRelToBoolToTermMap() {
-  //   return m_relToBoolToTermMap;
-  // }
-
-public:
-  FiniteMapHornModelConverter() {}
-
-  bool convert(HornDbModel &in, HornDbModel &out);
-
-  // void addRelToBoolToTerm(Expr rel, ExprMap &boolToTermMap) {
-  //   // m_relToBoolToTermMap.insert(std::make_pair(rel, boolToTermMap));
-  // }
-  // void setNewToOldPredMap(std::map<Expr, Expr> &newToOldMap) {
-  //   // m_newToOldPredMap = newToOldMap;
-  // }
-  void setAbsDB(HornClauseDB &db) { m_abs_db = &db; }
-};
-
 } // namespace seahorn
- 

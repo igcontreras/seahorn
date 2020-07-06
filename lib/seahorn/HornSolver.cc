@@ -1,5 +1,8 @@
 #include "seahorn/HornSolver.hh"
 #include "seahorn/Expr/ExprLlvm.hh"
+#include "seahorn/Expr/ExprOpFiniteMap.hh"
+#include "seahorn/Expr/ExprVisitor.hh"
+#include "seahorn/FiniteMapTransf.hh"
 #include "seahorn/HornClauseDBTransf.hh"
 #include "seahorn/HornDbModel.hh"
 #include "seahorn/HornifyModule.hh"
@@ -12,6 +15,10 @@
 
 #include "seahorn/Support/SeaDebug.h"
 #include <climits>
+
+namespace seahorn {
+extern bool InterProcMemFmaps;
+}
 
 using namespace llvm;
 
@@ -261,6 +268,32 @@ void HornSolver::printInvars(Module &M, HornDbModel &model) {
     printInvars(F, model);
 }
 
+// returns the invars if the encoding contained fmaps
+static Expr processFmaps(Expr bbfapp, HornDbModel &model) {
+
+  Expr bbPredDecl = bind::name(bbfapp);
+  Expr bbPredTDecl = finite_map::mkMapsDecl(bbPredDecl);
+
+  if (bbPredDecl == bbPredTDecl)
+    return model.getDef(bbfapp);
+
+  ExprMap predDeclTransf;
+  ExprSet allVars; // not really necessary
+  predDeclTransf[bbPredDecl] = bbPredTDecl;
+  FiniteMapArgsVisitor fmav(allVars, predDeclTransf, bbfapp->efac());
+  // some fmap was removed
+  Expr bbfappAndT = visit(fmav, bbfapp);
+  if (isOpX<AND>(bbfappAndT)) // some expansion happened
+    bbfapp = bbfappAndT->last();
+
+  Expr invar = model.getDef(bbfapp);
+
+  if(!isOpX<TRUE>(invar)){
+    outs() << "-- transformed fapp:" << *bbfappAndT << "\n";
+  }
+  return invar;
+}
+
 void HornSolver::printInvars(Function &F, HornDbModel &model) {
   if (F.isDeclaration())
     return;
@@ -282,10 +315,16 @@ void HornSolver::printInvars(Function &F, HornDbModel &model) {
     outs() << *bind::fname(bbPred) << ":";
     const ExprVector &live = hm.live(BB);
     // Expr invars = fp.getCoverDelta (bind::fapp (bbPred, live));
-    Expr invars = model.getDef(bind::fapp(bbPred, live));
+    Expr bbfapp = bind::fapp(bbPred, live);
+
+    Expr invars;
+    if (InterProcMemFmaps)
+      invars = processFmaps(bbfapp, model);
+    else
+      invars = model.getDef(bbfapp);
 
     if (isOpX<AND>(invars)) {
-      outs() << "\n\t";
+      outs() << "\n";
       for (size_t i = 0; i < invars->arity(); ++i)
         outs() << "\t" << *invars->arg(i) << "\n";
     } else
