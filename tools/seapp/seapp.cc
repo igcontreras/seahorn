@@ -200,6 +200,10 @@ static llvm::cl::opt<bool> FatBoundsCheck(
         "Instrument buffer bounds check  using extended pointer bits"),
     llvm::cl::init(false));
 
+static llvm::cl::opt<bool> LowerIsDeref("lower-is-deref",
+                                        llvm::cl::desc("Lower sea_is_dereferenceable() calls"),
+                                        llvm::cl::init(false));
+
 static llvm::cl::opt<bool>
     StripShadowMem("strip-shadow-mem",
                    llvm::cl::desc("Strip shadow memory functions"),
@@ -382,7 +386,7 @@ int main(int argc, char **argv) {
     // -- apply mixed semantics
     assert(LowerSwitch && "Lower switch must be enabled");
     pm_wrapper.add(llvm::createLowerSwitchPass());
-    pm_wrapper.add(seahorn::createPromoteVerifierClassPass());
+    pm_wrapper.add(seahorn::createPromoteVerifierCallsPass());
     pm_wrapper.add(seahorn::createCanFailPass());
     pm_wrapper.add(seahorn::createMixedSemanticsPass());
     pm_wrapper.add(seahorn::createRemoveUnreachableBlocksPass());
@@ -414,6 +418,8 @@ int main(int argc, char **argv) {
   } else if (FatBoundsCheck) {
     initializeFatBufferBoundsCheckPass(Registry);
     pm_wrapper.add(seahorn::createFatBufferBoundsCheckPass());
+  } else if (LowerIsDeref) {
+    pm_wrapper.add(seahorn::createLowerIsDerefPass());
   }
   // default pre-processing pipeline
   else {
@@ -424,7 +430,7 @@ int main(int argc, char **argv) {
     pm_wrapper.add(seahorn::createDummyMainFunctionPass());
 
     // -- promote verifier specific functions to special names
-    pm_wrapper.add(seahorn::createPromoteVerifierClassPass());
+    pm_wrapper.add(seahorn::createPromoteVerifierCallsPass());
 
     // -- promote top-level mallocs to alloca
     pm_wrapper.add(seahorn::createPromoteMallocPass());

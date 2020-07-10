@@ -22,7 +22,12 @@
 #include "seahorn/Expr/Expr.hh"
 #include "seahorn/Expr/ExprInterp.hh"
 #include "seahorn/Expr/ExprLlvm.hh"
+#include "seahorn/Expr/ExprOpBinder.hh"
 #include "seahorn/Expr/ExprOpBv.hh"
+#include "seahorn/Support/SeaDebug.h"
+#include "seahorn/Support/SeaLog.hh"
+
+#include <fstream>
 
 namespace z3 {
 struct ast_ptr_hash : public std::unary_function<ast, std::size_t> {
@@ -474,6 +479,13 @@ public:
   ZParams<Z> &params() { return m_params; }
 
   Expr simplify(Expr e) {
+    if (strct::isStructVal(e)) {
+      llvm::SmallVector<Expr, 8> kids;
+      for (unsigned i = 0, sz = e->arity(); i < sz; ++i) {
+        kids.push_back(simplify(e->arg(i)));
+      }
+      return strct::mk(kids);
+    }
     auto it = m_cache.find(e);
     if (it != m_cache.end())
       return it->second;
@@ -482,6 +494,7 @@ public:
     Expr res = z3.toExpr(z3::ast(ctx, Z3_simplify_ex(ctx, ast, m_params)),
                          m_ast_to_expr);
     m_cache.insert({e, res});
+
     return res;
   }
 
