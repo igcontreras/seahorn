@@ -183,7 +183,7 @@ static Expr getValueAtDef(Expr map, Expr lks, Expr k, unsigned pos) {
 // \brief `ml` contains the same values as `mr`.
 static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
 
-  errs() << "-- mkEqCore " << *ml << " = " << *mr << "\n";
+  LOG("fmap_transf",errs() << "-- mkEqCore " << *ml << " = " << *mr << "\n";);
   Expr mrDefk = nullptr, mlDefk = nullptr;
 
   if (!isOpX<CONST_FINITE_MAP>(
@@ -266,7 +266,7 @@ static Expr mkDefFMapCore(Expr map, FMapExprsInfo &fmei) {
 // -- rewrites a map get primitive
 static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
 
-  errs() << "-- mkGetCore " << *map << " " << *key << "\n";
+  LOG("fmap_transf",errs() << "-- mkGetCore " << *map << " " << *key << "\n";);
   Expr lmdKeys = fmei.m_typeLmd[map];
   assert(lmdKeys);
 
@@ -276,7 +276,7 @@ static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
 // -- rewrites a map set primitive
 static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
 
-  errs() << "-- mkSetCore " << *map << " " << *key << " " << *value << "\n";
+  LOG("fmap_transf",errs() << "-- mkSetCore " << *map << " " << *key << " " << *value << "\n";);
 
   Expr fmTy = fmei.m_type[map];
   Expr lmdKeys = fmei.m_typeLmd[map];

@@ -76,26 +76,31 @@ struct FiniteMap {
   /// ensures that the left child is a valid key type, and right is a valid value
   /// \return: FINITE_MAP_TY
   static inline Expr inferType(Expr exp, TypeChecker &tc) {
-    if (exp->arity() != 2)
+    if (exp->arity() != 2 && exp->arity() != 3)
       return sort::errorTy(exp->efac());
 
     Expr keys = exp->left();
-    Expr vals = exp->right();
+    Expr defval = exp->right();
 
     if (!isOp<CONST_FINITE_MAP_KEYS>(keys))
       return sort::errorTy(exp->efac());
 
-    if (!(isOp<CONST_FINITE_MAP_VALUES>(vals) ||
-          isOp<FINITE_MAP_VAL_DEFAULT>(vals)))
+    if (!isOp<FINITE_MAP_VAL_DEFAULT>(defval))
       return sort::errorTy(exp->efac());
 
-    if (isOp<CONST_FINITE_MAP_VALUES>(vals)) {
-      if (keys->arity() != vals->arity())
-        return sort::errorTy(exp->efac());
+    if(exp->arity() == 3){
+      Expr vals = exp->last();
+      // TODO: check that all values are of the type of the default
+      if (isOp<CONST_FINITE_MAP_VALUES>(vals)) {
+        if (keys->arity() != vals->arity())
+          return sort::errorTy(exp->efac());
+        else if (tc.typeOf(defval) != tc.typeOf(vals->first()))
+          return sort::errorTy(exp->efac());
+      }
     }
 
     ExprVector keyVector(keys->args_begin(), keys->args_end());
-    return sort::finiteMapTy(tc.typeOf(vals), keyVector);
+    return sort::finiteMapTy(tc.typeOf(defval), keyVector);
   }
 };
 

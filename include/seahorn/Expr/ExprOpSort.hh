@@ -60,8 +60,10 @@ NOP(ARRAY_TY, "ARRAY", PREFIX, SimpleTypeOp, typeCheck::simpleType::Simple)
 /// \biref Struct type
 NOP(STRUCT_TY, "STRUCT", PREFIX, SimpleTypeOp, typeCheck::simpleType::Simple)
 /// \biref FiniteMap type
-NOP(FINITE_MAP_TY, "FINITE_MAP", PREFIX, SimpleTypeOp, typeCheck::simpleType::Simple)
-NOP(FINITE_MAP_KEYS_TY, "FINITE_MAP_KS", PREFIX, SimpleTypeOp, typeCheck::simpleType::Simple)
+NOP(FINITE_MAP_TY, "FINITE_MAP", PREFIX, SimpleTypeOp,
+    typeCheck::simpleType::Simple)
+NOP(FINITE_MAP_KEYS_TY, "FINITE_MAP_KS", PREFIX, SimpleTypeOp,
+    typeCheck::simpleType::Simple)
 /// \brief ANY type
 NOP(ANY_TY, "ANY", PREFIX, SimpleTypeOp, typeCheck::simpleType::Simple)
 /// \brief Error type
@@ -97,13 +99,13 @@ template <typename Range> Expr structTy(const Range &ty) {
   return mknary<STRUCT_TY>(ty);
 }
 
-inline Expr finiteMapTy(Expr valTy, Expr k) { return mk<FINITE_MAP_TY>(valTy, mk<FINITE_MAP_KEYS_TY>(k));
+inline Expr finiteMapTy(Expr valTy, Expr k) {
+  return mk<FINITE_MAP_TY>(valTy, mk<FINITE_MAP_KEYS_TY>(k));
 }
 inline Expr finiteMapTy(Expr valTy, Expr k1, Expr k2) {
   return mk<FINITE_MAP_TY>(valTy, mk<FINITE_MAP_KEYS_TY>(k1, k2));
 }
-template <typename Range>
-Expr finiteMapTy(Expr valTy, const Range &ks) {
+template <typename Range> Expr finiteMapTy(Expr valTy, const Range &ks) {
   // The keys already contain a type
   return mk<FINITE_MAP_TY>(valTy, mknary<FINITE_MAP_KEYS_TY>(ks));
 }

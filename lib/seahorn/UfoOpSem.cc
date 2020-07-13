@@ -748,9 +748,10 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       if (!m_sem.isTracked(I))
         return;
 
-      if (F.getName().equals("shadow.mem.init"))
-        m_s.havoc(symb(I));
-      else if (F.getName().equals("shadow.mem.load")) {
+      if (F.getName().equals("shadow.mem.init")){
+        Expr mem = m_s.havoc(symb(I));
+        m_sem.execMemInit(CS, mem, m_side, m_s);
+      } else if (F.getName().equals("shadow.mem.load")) {
         const Value &v = *CS.getArgument(1);
         m_inMem = m_s.read(symb(v));
         m_uniq = extractUniqueScalar(CS) != nullptr;
@@ -897,6 +898,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         else {
           assert(bind::isFiniteMapConst(m_inMem));
           store = op::finite_map::set(m_inMem, idx, v);
+          assert(bind::isFiniteMapConst(m_outMem));
         }
 
         side(m_outMem, store, !ArrayGlobalConstraints);
@@ -1609,18 +1611,17 @@ void InterMemStats::copyTo(InterMemStats &ims) {
 
 // TODO: Move to FMapUfoOpSem.cc?
 
-Expr FMapUfoOpSem::symb(const Value &I) {
+Expr FMapUfoOpSem::symb(const Value &V) {
 
-  const Value *scalar = nullptr;
-  // TODO: cache symb
+ const Value *scalar = nullptr;
 
-  if (isShadowMem(I, &scalar)) {
-    if (const Instruction *i = dyn_cast<const Instruction>(&I)) {
+  if (isShadowMem(V, &scalar)) {
+    if (const Instruction *i = dyn_cast<const Instruction>(&V)) {
       const Function *F = i->getParent()->getParent();
       LOG("fmap_symb",
           errs() << "Variable of: " << F->getGlobalIdentifier() << "\n";);
 
-      if (const CallInst *CI = dyn_cast<const CallInst>(&I)) {
+      if (const CallInst *CI = dyn_cast<const CallInst>(&V)) {
         auto opt_c = m_shadowDsa->getShadowMemCell(*CI);
         assert(opt_c.hasValue());
         const Node &n = *const_cast<Node *>(opt_c.getValue().getNode());
@@ -1628,7 +1629,7 @@ Expr FMapUfoOpSem::symb(const Value &I) {
             m_preproc->getNumAccesses(&n, F); // this should be by cell
 
         if (nKs > 0) {
-          Expr v = mkTerm<const Value *>(&I, m_efac); // same name as array but
+          Expr v = mkTerm<const Value *>(&V, m_efac); // same name as array but
                                                       // different sort
           ExprVector keys;
           for (int i = 0; i < nKs; i++)
@@ -1637,17 +1638,18 @@ Expr FMapUfoOpSem::symb(const Value &I) {
 
           Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
           LOG("fmap_symb",
-              errs() << "       " << *sort::finiteMapTy(intTy, keys) << "\n";);
-          // errs() << *v << " in " << F->getGlobalIdentifier() << " of sort :
-          // \n "
-          //        << *sort::finiteMapTy(intTy, keys) << "\n";
+              errs() << *v << ": " << *sort::finiteMapTy(intTy, keys) << "\n";);
 
           return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
         }
+      } else if (const PHINode *PI = dyn_cast<const PHINode>(&V)) {
+        Value * vPI = PI->getIncomingValue(0);
+        Expr incomingConst = symb(*vPI);
+        return bind::mkConst(mkTerm<const Value *>(vPI, m_efac), bind::rangeTy(bind::name(incomingConst)));
       }
     }
   }
-  return UfoOpSem::symb(I);
+  return UfoOpSem::symb(V);
 }
 
 void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
@@ -1669,7 +1671,6 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
   // associates cells in the caller graph with its exprs
   processShadowMemsCallSite(csi);
-  // TODO: review FMapUfoOpSem::processShadowMemsCallSite
 
   CallSite &CS = csi.m_cs;
   Graph &calleeG = ga.getSummaryGraph(*calleeF);
