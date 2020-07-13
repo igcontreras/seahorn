@@ -283,13 +283,18 @@ static Expr processFmaps(Expr bbfapp, HornDbModel &model) {
   FiniteMapArgsVisitor fmav(allVars, predDeclTransf, bbfapp->efac());
   // some fmap was removed
   Expr bbfappAndT = visit(fmav, bbfapp);
-  if (isOpX<AND>(bbfappAndT)) // some expansion happened
-    bbfapp = bbfappAndT->last();
 
-  Expr invar = model.getDef(bbfapp);
+  Expr invar;
+  if (isOpX<AND>(bbfappAndT)) // some expansion happened
+    invar = model.getDef(bbfappAndT->last());
+  else
+    invar = model.getDef(bbfapp);
 
   if(!isOpX<TRUE>(invar)){
-    outs() << "-- transformed fapp:" << *bbfappAndT << "\n";
+    outs() << *bbfapp << " where:\n";
+    auto arg_it = bbfappAndT->args_begin();
+    for (; arg_it != bbfappAndT->args_end() -1 ; arg_it++)
+      outs()  << "\t" << **arg_it << "\n";
   }
   return invar;
 }
