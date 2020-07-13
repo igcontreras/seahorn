@@ -86,6 +86,8 @@ public:
   unsigned fieldOff(const StructType *t, unsigned field);
 
   virtual void execCallSite(CallSiteInfo &csi, ExprVector &side, SymStore &s);
+  virtual void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
+                                 SymStore &s){}; // do nothing
 };
 
 enum class MemOpt { IN, OUT };
@@ -147,8 +149,6 @@ protected:
   bool hasOrigArraySymbol(const seadsa::Cell &c, MemOpt ao);
   // creates a new array symbol for array origE if it was not created already
   Expr getFreshArraySymbol(const seadsa::Cell &c, MemOpt ao);
-  // Expr getCurrArraySymbol(const Cell &c, MemOpt ao); // for encoding with
-  // scalars
 
   // creates a new array symbol for intermediate copies of an original array
   // origE. currE is the current intermediate name and newE is the new value to
@@ -217,6 +217,8 @@ public:
 
   Expr symb(const Value &v) override;
   void execCallSite(CallSiteInfo &CS, ExprVector &side, SymStore &s) override;
+
+  void execMemInit(CallSite &CS, Expr mem, ExprVector &side, SymStore &s) override;
 
 protected:
   void processShadowMemsCallSite(CallSiteInfo &csi) override;

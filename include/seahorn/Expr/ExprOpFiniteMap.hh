@@ -197,10 +197,6 @@ inline bool isInitializedFiniteMap(Expr m) {
 inline Expr get(Expr map, Expr idx) { return mk<GET>(map, idx); }
 inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
 
-// --------------- finite map sort ------------------------------------------
-inline Expr valTy(Expr fmTy) { return fmTy->left(); }
-inline Expr keys(Expr fmTy) { return fmTy->right(); }
-
 // --------------- transformation to lambda functions ------------------------
 // \brief the empty map is just the default value `edef`
 inline Expr mkEmptyMap(Expr edef) { return edef; }
@@ -324,8 +320,8 @@ inline Expr mkMapsDecl(Expr fdecl) {
   for (auto type : llvm::make_range(++fdecl->args_begin(), fdecl->args_end())) {
     if (isOpX<FINITE_MAP_TY>(type)) { // the type is a FiniteMap
       fmap_arg = true;
-      Expr vTy = finite_map::valTy(type);
-      Expr ksTy = finite_map::keys(type);
+      Expr vTy = sort::finiteMapValTy(type);
+      Expr ksTy = sort::finiteMapKeyTy(type);
       assert(ksTy->arity() > 0); // the map has at least one key
       auto ksIt = ksTy->args_begin();
       Expr kTy = bind::rangeTy(bind::fname(*ksIt)); // type of the key

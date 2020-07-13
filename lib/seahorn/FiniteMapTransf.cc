@@ -74,11 +74,11 @@ static Expr mkFappArgsCore(Expr fapp, Expr newFdecl, ExprVector &extraUnifs,
         // function, make new variable (same as normalization)
       }
 
-      Expr ksTy = finite_map::keys(argTy);
+      Expr ksTy = sort::finiteMapKeyTy(argTy);
       ExprVector keys(ksTy->args_begin(), ksTy->args_end());
       Expr lmdKeys = finite_map::mkKeys(keys, efac);
 
-      mkVarsMap(map_var_name, keys, finite_map::valTy(argTy), newArgs,
+      mkVarsMap(map_var_name, keys, sort::finiteMapValTy(argTy), newArgs,
                 extraUnifs, evars);
       // new arguments are added to `newArgs` in the function above
     } else {
@@ -143,10 +143,10 @@ static Expr mkFMapPrimitiveArgCore(Expr map, FMapExprsInfo &fmei) {
 
   Expr lmdKeys = fmei.m_typeLmd[map];
   Expr fmTy = fmei.m_type[map];
-  Expr vTy = finite_map::valTy(fmTy);
-  Expr ksTy = finite_map::keys(fmTy);
+  Expr vTy = sort::finiteMapValTy(fmTy);
+  Expr ksTy = sort::finiteMapKeyTy(fmTy);
 
-  errs() << "-- mkFMapPrimitiveArgCore arg: " << *map << "\n";
+  LOG("fmap_transf", errs() << "-- mkFMapPrimitiveArgCore arg: " << *map << "\n");
 
   if (bind::isFiniteMapConst(map)) {
     // if the map is a variable, it is assumed to be defined or expanded before.

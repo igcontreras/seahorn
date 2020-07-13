@@ -286,14 +286,14 @@ TEST_CASE("expr.finite_map.fm_type_declaration") {
   Expr fmTy = sort::finiteMapTy(sort::intTy(efac), keys);
   errs() << "Finite map type: " << fmTy << "\n";
   CHECK(isOpX<FINITE_MAP_TY>(fmTy));
-  CHECK(isOpX<FINITE_MAP_KEYS_TY>(finite_map::keys(fmTy)));
+  CHECK(isOpX<FINITE_MAP_KEYS_TY>(sort::finiteMapKeyTy(fmTy)));
 
   keys.push_back(mkIntKey(5, efac));
   fmTy = sort::finiteMapTy(bv::bvsort(64, efac), keys);
   errs() << "Finite map type: " << fmTy << "\n";
 
   CHECK(isOpX<FINITE_MAP_TY>(fmTy));
-  CHECK(isOpX<FINITE_MAP_KEYS_TY>(finite_map::keys(fmTy)));
+  CHECK(isOpX<FINITE_MAP_KEYS_TY>(sort::finiteMapKeyTy(fmTy)));
 }
 
 // same as map_in_body_1key but using HornClauseDB

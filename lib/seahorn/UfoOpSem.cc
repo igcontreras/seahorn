@@ -1627,13 +1627,9 @@ Expr FMapUfoOpSem::symb(const Value &I) {
         unsigned nKs =
             m_preproc->getNumAccesses(&n, F); // this should be by cell
 
-        LOG("fmap_symb", errs() << "Node: " << n << "\n"
-                                << I << " has " << nKs << " accesses\n";);
-
         if (nKs > 0) {
           Expr v = mkTerm<const Value *>(&I, m_efac); // same name as array but
                                                       // different sort
-
           ExprVector keys;
           for (int i = 0; i < nKs; i++)
             keys.push_back(bind::intConst(
@@ -1661,7 +1657,6 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
   GlobalAnalysis &ga = m_shadowDsa->getDsaAnalysis();
   const Function *calleeF = csi.m_cs.getCalledFunction();
-  // const Function &F = *csi.m_cs.getCaller();
 
   LOG("inter_mem_fmaps",
       errs() << "callee: " << calleeF->getGlobalIdentifier() << "\ncaller: "
@@ -1673,7 +1668,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   }
 
   // associates cells in the caller graph with its exprs
-  MemUfoOpSem::processShadowMemsCallSite(csi);
+  processShadowMemsCallSite(csi);
   // TODO: review FMapUfoOpSem::processShadowMemsCallSite
 
   CallSite &CS = csi.m_cs;
@@ -1815,7 +1810,9 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
 
     const Cell nextCaller(c_caller, f.getOffset());
 
-    Expr origIn = getOrigMemSymbol(nextCaller, MemOpt::IN); // TODO: review for output mem
+    Expr origIn = hasOrigArraySymbol(nextCaller, MemOpt::IN)
+                      ? getOrigMemSymbol(nextCaller, MemOpt::IN)
+                      : getOrigMemSymbol(nextCaller, MemOpt::OUT);
     Expr origOut = hasOrigArraySymbol(nextCaller, MemOpt::OUT)
                        ? getOrigMemSymbol(nextCaller, MemOpt::OUT)
                        : origIn;
@@ -1867,12 +1864,22 @@ void FMapUfoOpSem::storeVal(Cell c, Expr readFrom, Expr basePtr, Expr offset) {
   Expr out = getOrigMemSymbol(c, MemOpt::OUT);
   Expr dir = mk<PLUS>(basePtr, offset);
 
+  Expr origMem;
+  if (hasOrigArraySymbol(c, MemOpt::IN)) // the cell is read and written
+    origMem = getOrigMemSymbol(c, MemOpt::IN);
+  else { // the cell is only written, we create empty mem region
+    Expr origMemOut = arrayVariant(getOrigMemSymbol(c, MemOpt::OUT));
+    // if (isFiniteConst(origMemOut)) {
+    //   origMem = finite_map::constFiniteMap(AAAAAA,m_fmapDefault); // create empty map
+    // } else
+      origMem = arrayVariant(origMemOut);
+  }
+
   // -- store in the original in mem if it is the first store or else in the
   //    previous term for storing
-  Expr storeAt = (m_fmOut.count(out) == 0) ? getOrigMemSymbol(c, MemOpt::IN)
-                                           : m_fmOut[out];
-  errs() << "Storing at: " << *storeAt << "\n";
-  errs() << "\t from: " << *readFrom << "\n";
+  Expr storeAt = (m_fmOut.count(out) == 0) ? origMem : m_fmOut[out];
+  LOG("inter_mem_fmaps", errs() << "Storing at: " << *storeAt
+                                << "\n\t from: " << *readFrom << "\n";);
   Expr value = memObtainValue(readFrom, dir);
 
   m_fmOut[out] = memSetValue(storeAt, dir, value); // additional stores
@@ -1891,9 +1898,7 @@ Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee,
   Expr origE = getOrigMemSymbol(cCaller, ao);
 
   if (m_replace.count(origE) == 0) { // not copied yet
-
-    unsigned nKs = m_preproc->getNumCIAccessesCellSummary(
-        cCallee, &F); // this should be by cell
+    unsigned nKs = m_preproc->getNumCIAccessesCellSummary(cCallee, &F);
 
     ExprVector keys;
     for (int i = 0; i < nKs; i++)
@@ -1936,6 +1941,21 @@ void FMapUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
     I = I->getPrevNode();
     i--;
   }
+}
+
+void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side, SymStore &s) {
+
+  Instruction &I = *CS.getInstruction();
+
+  if(!bind::isFiniteMapConst(initMem))
+    return;
+
+  Function &F = *CS.getCaller();
+  Expr fmapKeysTy = sort::finiteMapKeyTy(bind::rangeTy(bind::fname(initMem)));
+
+  ExprVector keys(fmapKeysTy->args_begin(), fmapKeysTy->args_end());
+
+  side.push_back(mk<EQ>(initMem, finite_map::constFiniteMap(keys, m_fmapDefault)));
 }
 
 } // namespace seahorn
