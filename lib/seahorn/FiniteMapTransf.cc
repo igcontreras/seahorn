@@ -21,9 +21,9 @@ static Expr mkVarGet(Expr mapConst, Expr k, Expr vTy) {
   return bind::mkConst(variant::variant(0, finite_map::get(mapConst, k)), vTy);
 }
 
-// \brief rewrites a map into separate scalar variables. New variables are added
-// to `new_vars`, new unifications are added to `extra_unifs`
-void mkVarsMap(Expr map, const ExprVector &keys, Expr vTy, ExprVector &new_vars,
+// \brief rewrites a map into separate scalar variables. New arguments are added
+// to `newArgs`, new unifications are added to `extra_unifs`
+void mkVarsMap(Expr map, const ExprVector &keys, Expr vTy, ExprVector &newArgs,
                ExprVector &extra_unifs, ExprSet &evars) {
 
   Expr v, v_get;
@@ -34,12 +34,17 @@ void mkVarsMap(Expr map, const ExprVector &keys, Expr vTy, ExprVector &new_vars,
     v = mkVarGet(map, k, vTy);
     evars.insert(v);
     evars.insert(k);
-    new_vars.push_back(k);
-    new_vars.push_back(v);
+    newArgs.push_back(k);
+    newArgs.push_back(v);
     *val_it++ = v;
   }
+  Expr defaultV = bind::mkConst(variant::variant(0, map_values.back()), vTy);
+  evars.insert(defaultV);
+
+  // defaultV = map_values.back();
+
   extra_unifs.push_back(
-                        mk<EQ>(map, finite_map::constFiniteMap(keys, map_values.back(), map_values)));
+                        mk<EQ>(map, finite_map::constFiniteMap(keys, defaultV, map_values)));
 }
 
 // \brief rewrites the map arguments of fapps into separate scalar variables
@@ -249,7 +254,7 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
 //
 // defmap(defk(keys), fmap-default(valTy)))
 //      or
-// defmap(defk(keys), defv(values)))
+// defmap(defk(keys), fmap-default(valTy), defv(values)))
 static Expr mkDefFMapCore(Expr map, FMapExprsInfo &fmei) {
 
   Expr defk = finite_map::fmapDefKeys(map);
