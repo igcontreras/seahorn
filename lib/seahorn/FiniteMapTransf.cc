@@ -208,10 +208,10 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
       fmei.m_typeLmd[ml] = fmei.m_typeLmd[mr];
       fmei.m_fmapVarTransf[ml] = mr;
 
-      errs() << "Stored keys: " << *ml << " = " << *mrDefk << "\n";
-      errs() << "\t expansion: " << *mr << "\n";
-      errs() << "\t lambda: "
-             << *fmei.m_typeLmd[ml] << "\n";
+      // errs() << "Stored keys: " << *ml << " = " << *mrDefk << "\n";
+      // errs() << "\t expansion: " << *mr << "\n";
+      // errs() << "\t lambda: "
+      //        << *fmei.m_typeLmd[ml] << "\n";
       return mk<TRUE>(fmei.m_efac);
     } else{
       assert(fmei.m_fmapDefk.count(ml) > 0);

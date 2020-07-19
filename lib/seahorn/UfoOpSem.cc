@@ -682,6 +682,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         // XXX This is potentially unsound if the corresponding DSA
         // XXX node corresponds to multiple allocation sites
         errs() << "WARNING: zero-initializing DSA node due to calloc()\n";
+        // TODO: add assert
         if (m_uniq) {
           side(m_outMem, zeroE);
         } else {
@@ -702,6 +703,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
             Expr val =
                 mkTerm<expr::mpz_class>(expr::toMpz(c->getValue()), m_efac);
             errs() << "WARNING: initializing DSA node due to memset()\n";
+            // TODO: add assert
             if (m_uniq) {
               side(m_outMem, val);
             } else {
@@ -761,6 +763,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         m_uniq = extractUniqueScalar(CS) != nullptr;
       } else if (F.getName().equals("shadow.mem.global.init")) {
         m_inMem = m_s.read(symb(*CS.getArgument(1)));
+        m_sem.execMemInit(CS, m_inMem, m_side, m_s); // TODO: review
         m_outMem = m_s.havoc(symb(I));
         m_side.push_back(mk<EQ>(m_outMem, m_inMem));
       } else if (F.getName().equals("shadow.mem.arg.ref"))

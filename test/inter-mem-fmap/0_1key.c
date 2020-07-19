@@ -1,4 +1,4 @@
-// RUN: sea smt -O0 --dsa=sea-cs --horn-shadow-mem-optimize=false --horn-inter-proc-fmaps %s
+// RUN: sea pf -O0 --dsa=sea-cs --horn-shadow-mem-optimize=false --horn-inter-proc-fmaps %s
 
 // CHECK: ^unknown$
 // XFAIL: *

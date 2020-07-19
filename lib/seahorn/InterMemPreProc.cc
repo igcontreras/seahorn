@@ -219,20 +219,23 @@ void InterMemPreProc::preprocFunction(const Function *F) {
     if (buG.hasCell(a))
       recProcessNode(buG.getCell(a), unsafeSAS, simMap, explored, rm);
 
+  explored.clear();
   for (auto &kv :
        boost::make_iterator_range(buG.globals_begin(), buG.globals_end())) {
     Cell &c = *kv.second;
     recProcessNode(c, unsafeSAS, simMap, explored, rm);
   }
 
-  // TODO: uncomment to get rid of as many arrays as possible
   LOG(
-      "fmap_scalars", for (auto &kv
-                           : buG.scalars()) {
+      "fmap_scalars", errs() << "processing scalars\n";
+      explored.clear();
+      for (auto &kv
+           : buG.scalars()) {
         Cell &c = *kv.second;
         recProcessNode(c, unsafeSAS, simMap, explored, rm);
       });
 
+  explored.clear();
   if (buG.hasRetCell(*F))
     recProcessNode(buG.getRetCell(*F), unsafeSAS, simMap, explored, rm);
 }
@@ -260,8 +263,7 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
   const Cell &cTo = simMap.get(cFrom);
   const Node *nTo = cTo.getNode();
 
-  if ( // nFrom->isModified() &&
-      !cFrom.getNode()->types().empty() && isSafeNode(unsafeNodes, nTo))
+  if (!cFrom.getNode()->types().empty() && isSafeNode(unsafeNodes, nTo))
     rm[nTo] = rm[nTo] + cFrom.getNode()->types().size();
 
   if (nFrom->getLinks().empty())
