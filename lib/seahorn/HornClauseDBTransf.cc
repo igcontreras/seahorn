@@ -143,7 +143,7 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
   for (auto &q : db.getQueries())
     tdb.addQuery(q);
 
-  errs() << "HCDB no args maps" << tdb << "\n";
+  // errs() << "HCDB no args maps" << tdb << "\n";
 
   // Remove Finite Maps from Bodies
   std::vector<HornRule> worklist;

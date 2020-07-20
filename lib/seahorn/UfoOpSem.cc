@@ -18,6 +18,10 @@
 // For fmaps, move to a new .cc file
 #include "seahorn/Expr/ExprOpFiniteMap.hh"
 
+// keep asserts of this file
+#undef NDEBUG
+#include <assert.h>
+
 using namespace seadsa;
 namespace seahorn {
 // counters for encoding with InterProcMem option
@@ -1619,6 +1623,7 @@ Expr FMapUfoOpSem::symb(const Value &V) {
  const Value *scalar = nullptr;
 
   if (isShadowMem(V, &scalar)) {
+    if (!scalar){
     if (const Instruction *i = dyn_cast<const Instruction>(&V)) {
       const Function *F = i->getParent()->getParent();
       LOG("fmap_symb",
@@ -1650,6 +1655,7 @@ Expr FMapUfoOpSem::symb(const Value &V) {
         Expr incomingConst = symb(*vPI);
         return bind::mkConst(mkTerm<const Value *>(vPI, m_efac), bind::rangeTy(bind::name(incomingConst)));
       }
+    }
     }
   }
   return UfoOpSem::symb(V);
