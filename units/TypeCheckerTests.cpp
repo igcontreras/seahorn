@@ -1486,11 +1486,11 @@ TEST_CASE("finiteMapWellFormed.test") {
   checkWellFormed(e, finiteMapSort2);
   e.clear();
 
-  temp = finite_map::constFiniteMap(keys, vals);
+  temp = finite_map::constFiniteMap(keys, vals[0], vals);
   keys.clear();
   keys.push_back(cIntKey);
   keys.push_back(dIntKey);
-  Expr temp2 = finite_map::constFiniteMap(keys, vals);
+  Expr temp2 = finite_map::constFiniteMap(keys, vals[0], vals);
   e.push_back(mk<EQ>(temp, temp2)); // keys have same type but different names
 
   checkWellFormed(e, boolSort);
