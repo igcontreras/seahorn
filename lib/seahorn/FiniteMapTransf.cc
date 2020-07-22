@@ -210,7 +210,7 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
   fmei.m_typeLmd[mapConst] = mapLmdKeys;
   fmei.m_typeLmd[mapDef] = mapLmdKeys;
   fmei.m_fmapDefk[mapConst] = finite_map::fmapDefKeys(mapDef);
-  
+
   return mapDef;
 }
 
@@ -227,7 +227,7 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
       if (fmei.m_fmapVarTransf.count(mr) == 0) {
         // if no expansion is found, create a finite map with fresh consts
         mr = mkEmptyConstMap(mr,fmei);
-	mrDefk = finite_map::fmapDefKeys(mr);
+        mrDefk = finite_map::fmapDefKeys(mr);
         errs() << "Expansion not found " << *mr << "\n";
       }
       else{
@@ -288,9 +288,9 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
 // -- processes a fmap definition, building the type and the lmdkeys
 // term is of the form:
 //
-// defmap(defk(keys), fmap-default(valTy)))
+// defmap(defk(keys), fmap-default(defval)))
 //      or
-// defmap(defk(keys), fmap-default(valTy), defv(values)))
+// defmap(defk(keys), fmap-default(defval), defv(values)))
 static Expr mkDefFMapCore(Expr map, FMapExprsInfo &fmei) {
 
   Expr defk = finite_map::fmapDefKeys(map);
@@ -332,7 +332,7 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
   }
   lmdKeys = fmei.m_typeLmd[map];
   assert(lmdKeys);
-  
+
   Expr fmTy = fmei.m_type[map];
 
   Expr procMap = mkFMapPrimitiveArgCore(map, fmei);

@@ -12,9 +12,9 @@
 #include "llvm/Support/CommandLine.h"
 
 static llvm::cl::opt<bool>
-FmapSimplify("horn-fmap-simp",
-             llvm::cl::desc("Simplify after removal of finite maps"),
-             llvm::cl::init(false));
+    FmapSimplify("horn-fmap-simp",
+                 llvm::cl::desc("Simplify after removal of finite maps"),
+                 llvm::cl::init(false));
 
 namespace seahorn {
 using namespace expr;
@@ -119,10 +119,6 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
       ruleE = rule.get();
 
     Expr newRuleE = visit(fmav, ruleE, dvc);
-    // LOG("fmap_transf_rule", errs() << "old rule:\n\t" << *rule.body()
-    //                                << "\nnew rule:\n\t" << *newBody <<
-    //                                "\n";);
-    // errs() << "------- body:\n" << *rule.body() << "\n";
 
     HornRule newRule(allVars, newRuleE);
 
@@ -142,8 +138,6 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
   // copy queries
   for (auto &q : db.getQueries())
     tdb.addQuery(q);
-
-  // errs() << "HCDB no args maps" << tdb << "\n";
 
   // Remove Finite Maps from Bodies
   std::vector<HornRule> worklist;
@@ -181,7 +175,8 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
 
   LOG("print_clauses", errs() << "------- TRANSFORMED CLAUSE DB ------\n";
       for (auto &cl
-             : tdb.getRules()) cl.get()->dump(););
+           : tdb.getRules()) cl.get()
+          ->dump(););
 
   if (FmapSimplify) {
 
@@ -192,17 +187,13 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
 
     for (auto rule : worklist) {
 
+      Expr simpBody = z3_simplify(z3, rule.body()); // run it on the body
+      Expr simpRule = mk<IMPL>(rule.body(), rule.head());
+
       const ExprVector &rvars = rule.vars();
       ExprSet simpVars(rvars.begin(), rvars.end());
 
       tdb.removeRule(rule);
-
-      Expr simpRule = z3_simplify(z3, rule.get());
-      // ExprSet simpVars;
-      // expr::filter(simpRule, bind::IsConst(),
-      //              std::inserter(simpVars, simpVars.begin()));
-
-      // TODO: remove vars that aren't present in the simplified rule?
       tdb.addRule(simpVars, simpRule);
     }
   }
