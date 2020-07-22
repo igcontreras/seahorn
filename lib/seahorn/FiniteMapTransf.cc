@@ -100,6 +100,9 @@ VisitAction FiniteMapArgsVisitor::operator()(Expr exp) {
 
   if (isOpX<IMPL>(exp)) { // rule (or implication inside rule?)
     Expr head = exp->right();
+    if (!bind::isFapp(head))
+      return VisitAction::doKids();
+
     Expr body = exp->left();
     Expr fdecl = *head->args_begin();
 
