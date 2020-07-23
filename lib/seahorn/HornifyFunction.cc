@@ -161,7 +161,7 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
 
   const BasicBlock *exit = findExitBlock(F);
   if (!exit) {
-    errs() << "The exit block of " << F.getName() << " is unreachable.\n";
+    WARN << "the exit block of function " << F.getName() << " is unreachable";
     return;
   }
 
@@ -305,7 +305,7 @@ void LargeHornifyFunction::runOnFunction(Function &F) {
 
   const BasicBlock *exit = findExitBlock(F);
   if (!exit) {
-    errs() << "The exit block of " << F.getName() << " is unreachable.\n";
+    WARN << "the exit block of function " << F.getName() << " is unreachable";
     return;
   }
 
