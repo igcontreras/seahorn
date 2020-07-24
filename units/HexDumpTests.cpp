@@ -153,7 +153,7 @@ TEST_CASE("finiteMap.test") {
   values.push_back(mkTerm<mpz_class>(0x12345, efac));
   values.push_back(mkTerm<mpz_class>(0xaaaa1, efac));
 
-  Expr e = finite_map::constFiniteMap(keys, values);
+  Expr e = finite_map::constFiniteMap(keys, values[0], values);
   e = finite_map::set(e, mkTerm<mpz_class>(0x500010, efac),
                       mkTerm<mpz_class>(4, efac));
   e = finite_map::set(e, mkTerm<mpz_class>(0x500010, efac),
