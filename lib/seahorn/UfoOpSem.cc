@@ -756,7 +756,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       if (!m_sem.isTracked(I))
         return;
 
-      if (F.getName().equals("shadow.mem.init")){
+      if (F.getName().equals("shadow.mem.init")) {
         Expr mem = m_s.havoc(symb(I));
         m_sem.execMemInit(CS, mem, m_side, m_s);
       } else if (F.getName().equals("shadow.mem.load")) {
@@ -1622,42 +1622,44 @@ void InterMemStats::copyTo(InterMemStats &ims) {
 
 Expr FMapUfoOpSem::symb(const Value &V) {
 
- const Value *scalar = nullptr;
+  const Value *scalar = nullptr;
 
   if (isShadowMem(V, &scalar)) {
-    if (!scalar){
-    if (const Instruction *i = dyn_cast<const Instruction>(&V)) {
-      const Function *F = i->getParent()->getParent();
-      LOG("fmap_symb",
-          errs() << "Variable of: " << F->getGlobalIdentifier() << "\n";);
+    if (!scalar) {
+      if (const Instruction *i = dyn_cast<const Instruction>(&V)) {
+        const Function *F = i->getParent()->getParent();
+        LOG("fmap_symb",
+            errs() << "Variable of: " << F->getGlobalIdentifier() << "\n";);
 
-      if (const CallInst *CI = dyn_cast<const CallInst>(&V)) {
-        auto opt_c = m_shadowDsa->getShadowMemCell(*CI);
-        assert(opt_c.hasValue());
-        const Node &n = *const_cast<Node *>(opt_c.getValue().getNode());
-        unsigned nKs =
-            m_preproc->getNumAccesses(&n, F); // this should be by cell
+        if (const CallInst *CI = dyn_cast<const CallInst>(&V)) {
+          auto opt_c = m_shadowDsa->getShadowMemCell(*CI);
+          assert(opt_c.hasValue());
+          const Node &n = *const_cast<Node *>(opt_c.getValue().getNode());
+          unsigned nKs =
+              m_preproc->getNumAccesses(&n, F); // this should be by cell
 
-        if (nKs > 0) {
-          Expr v = mkTerm<const Value *>(&V, m_efac); // same name as array but
-                                                      // different sort
-          ExprVector keys;
-          for (int i = 0; i < nKs; i++)
-            keys.push_back(bind::intConst(
-                variant::variant(i, variant::tag(v, m_keyBase))));
+          if (nKs > 0) {
+            Expr v = mkTerm<const Value *>(&V, m_efac); // same name as array
+                                                        // but different sort
+            ExprVector keys;
+            for (int i = 0; i < nKs; i++)
+              keys.push_back(bind::intConst(
+                  variant::variant(i, variant::tag(v, m_keyBase))));
 
-          Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
-          LOG("fmap_symb",
-              errs() << *v << ": " << *sort::finiteMapTy(intTy, keys) << "\n";);
+            Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
+            LOG("fmap_symb", errs()
+                                 << *v << ": "
+                                 << *sort::finiteMapTy(intTy, keys) << "\n";);
 
-          return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
+            return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
+          }
+        } else if (const PHINode *PI = dyn_cast<const PHINode>(&V)) {
+          Value *vPI = PI->getIncomingValue(0);
+          Expr incomingConst = symb(*vPI);
+          return bind::mkConst(mkTerm<const Value *>(vPI, m_efac),
+                               bind::rangeTy(bind::name(incomingConst)));
         }
-      } else if (const PHINode *PI = dyn_cast<const PHINode>(&V)) {
-        Value * vPI = PI->getIncomingValue(0);
-        Expr incomingConst = symb(*vPI);
-        return bind::mkConst(mkTerm<const Value *>(vPI, m_efac), bind::rangeTy(bind::name(incomingConst)));
       }
-    }
     }
   }
   return UfoOpSem::symb(V);
@@ -1882,9 +1884,10 @@ void FMapUfoOpSem::storeVal(Cell c, Expr readFrom, Expr basePtr, Expr offset) {
   else { // the cell is only written, we create empty mem region
     Expr origMemOut = arrayVariant(getOrigMemSymbol(c, MemOpt::OUT));
     // if (isFiniteConst(origMemOut)) {
-    //   origMem = finite_map::constFiniteMap(AAAAAA,m_fmapDefault); // create empty map
+    //   origMem = finite_map::constFiniteMap(AAAAAA,m_fmapDefault); // create
+    //   empty map
     // } else
-      origMem = arrayVariant(origMemOut);
+    origMem = arrayVariant(origMemOut);
   }
 
   // -- store in the original in mem if it is the first store or else in the
@@ -1955,11 +1958,12 @@ void FMapUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
   }
 }
 
-void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side, SymStore &s) {
+void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side,
+                               SymStore &s) {
 
   Instruction &I = *CS.getInstruction();
 
-  if(!bind::isFiniteMapConst(initMem))
+  if (!bind::isFiniteMapConst(initMem))
     return;
 
   Function &F = *CS.getCaller();
@@ -1967,7 +1971,8 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side, Sym
 
   ExprVector keys(fmapKeysTy->args_begin(), fmapKeysTy->args_end());
 
-  side.push_back(mk<EQ>(initMem, finite_map::constFiniteMap(keys, m_fmapDefault)));
+  side.push_back(
+      mk<EQ>(initMem, finite_map::constFiniteMap(keys, m_fmapDefault)));
 }
 
 } // namespace seahorn

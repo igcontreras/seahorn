@@ -33,12 +33,17 @@ void mkVarsMap(Expr map, const ExprVector &keys, Expr vTy, ExprVector &newArgs,
   Expr v, v_get;
   ExprVector map_values(keys.size());
   auto val_it = map_values.begin();
+  Expr keyTy = bind::rangeTy(bind::fname(keys[0]));
 
+  errs() << "--mkVarsMap" << *keyTy << "\n";
   for (auto k : keys) {
-    v = mkVarGet(map, k, vTy);
+    Expr key = bind::mkConst(variant::tag(bind::name(bind::fname(map)), k), keyTy);
+    errs() << "\t" << *key << "\n";
+
+    v = mkVarGet(map, key, vTy);
     evars.insert(v);
-    evars.insert(k);
-    newArgs.push_back(k);
+    evars.insert(key);
+    newArgs.push_back(key);
     newArgs.push_back(v);
     *val_it++ = v;
   }

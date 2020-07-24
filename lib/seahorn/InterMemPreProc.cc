@@ -197,6 +197,9 @@ void InterMemPreProc::preprocFunction(const Function *F) {
 
   GlobalAnalysis &ga = m_shadowDsa.getDsaAnalysis();
 
+  if(!ga.hasSummaryGraph(*F))
+    return;
+
   Graph &buG = ga.getSummaryGraph(*F);
   const Graph &sasG = ga.getGraph(*F);
 
