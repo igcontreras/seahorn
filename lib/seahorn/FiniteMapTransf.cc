@@ -32,26 +32,25 @@ void mkVarsMap(Expr map, const ExprVector &keys, Expr vTy, ExprVector &newArgs,
 
   Expr v, v_get;
   ExprVector map_values(keys.size());
-  auto val_it = map_values.begin();
+  ExprVector map_keys(keys.size());
   Expr keyTy = bind::rangeTy(bind::fname(keys[0]));
 
   errs() << "--mkVarsMap" << *keyTy << "\n";
   for (auto k : keys) {
     Expr key = bind::mkConst(variant::tag(bind::name(bind::fname(map)), k), keyTy);
-    errs() << "\t" << *key << "\n";
-
+    map_keys.push_back(key);
     v = mkVarGet(map, key, vTy);
+    map_values.push_back(v);
     evars.insert(v);
     evars.insert(key);
     newArgs.push_back(key);
     newArgs.push_back(v);
-    *val_it++ = v;
   }
   Expr defaultV = bind::mkConst(variant::variant(0, map_values.back()), vTy);
   evars.insert(defaultV);
 
   extra_unifs.push_back(
-      mk<EQ>(map, finite_map::constFiniteMap(keys, defaultV, map_values)));
+      mk<EQ>(map, finite_map::constFiniteMap(map_keys, defaultV, map_values)));
 }
 
 // \brief rewrites the map arguments of fapps into separate scalar variables
