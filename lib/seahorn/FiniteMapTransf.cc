@@ -203,8 +203,9 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
     keys.push_back(*k_it);
   }
 
-  Expr mapDef = finite_map::constFiniteMap(
-      keys, bind::mkConst(variant::variant(0, mapConst), vTy));
+  Expr defaultV = bind::mkConst(variant::variant(0, mapConst), vTy);
+  fmei.m_vars.insert(defaultV);
+  Expr mapDef = finite_map::constFiniteMap(keys, defaultV);
   fmei.m_fmapVarTransf[mapConst] = mapDef;
   fmei.m_type[mapConst] = mapTy;
   fmei.m_type[mapDef] = mapTy;

@@ -17,6 +17,11 @@ using ExplorationMap = DenseMap<const Node *, EColor>;
 
 bool isSafeNode(NodeSet &unsafe, const Node *n) { return unsafe.count(n) == 0; }
 
+// -- true if 2 nodes encode a memory object of unbounded size
+static bool isUnboundedMem(const Node *nSumm, const Node *nTD) {
+  return nSumm->isArray() || nTD->isOffsetCollapsed();
+}
+
 struct ExplorationInfo {
   ExplorationMap m_explColor;
   NodeSet &m_calleeUnsafe;
@@ -38,16 +43,15 @@ static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
   ei.m_explColor[&n] = EColor::BLACK;
 
   for (auto &links : n.getLinks()) {
-    const Field &f = links.first;
     const Cell &nextC = *links.second;
     const Node *nextN = nextC.getNode();
 
-    bool explored = ((ei.m_explColor.count(nextN) > 0) && ei.m_explColor[nextN] == EColor::BLACK);
+    bool explored = ((ei.m_explColor.count(nextN) > 0) &&
+                     ei.m_explColor[nextN] == EColor::BLACK);
     bool marked_safe = isSafeNode(ei.m_calleeUnsafe, nextN);
 
     if (!(explored && !marked_safe)) {
       const Node &nNextCaller = *ei.m_sm.get(nextC).getNode();
-
       propagateUnsafeChildren(*nextN, nNextCaller, ei);
     }
   }
@@ -57,21 +61,21 @@ static bool exploreNode(const Node &nCallee, const Node &nCaller,
                         ExplorationInfo &ei) {
   ei.m_explColor[&nCallee] = EColor::GRAY;
 
-  for (auto &links : nCallee.getLinks()) {
-    const Field &f = links.first;
-    const Cell &nextC = *links.second;
-    const Cell &nextCaller = ei.m_sm.get(nextC);
-    const Node *nextN = nextC.getNode();
-    if (nextN->isArray() || nextCaller.getNode()->isOffsetCollapsed()) { // encodes an object of unbounded size
-      propagateUnsafeChildren(nCallee, nCaller, ei);
-      return true;
-    } else {
+  if (isUnboundedMem(&nCallee, &nCaller)) {
+    propagateUnsafeChildren(nCallee, nCaller, ei);
+    return true;
+  } else {
+    for (auto &links : nCallee.getLinks()) {
+      const Cell &nextC = *links.second;
+      const Cell &nextCaller = ei.m_sm.get(nextC);
+      const Node *nextN = nextC.getNode();
       if (ei.m_explColor.count(nextN) == 0 &&
-               exploreNode(*nextN, *nextCaller.getNode(), ei))
-	return true;
-      else if (ei.m_explColor.count(nextN) > 0 && ei.m_explColor[nextN] == EColor::GRAY) {
-	propagateUnsafeChildren(nCallee, nCaller, ei);
-	return true;
+          exploreNode(*nextN, *nextCaller.getNode(), ei))
+        return true;
+      else if (ei.m_explColor.count(nextN) > 0 &&
+               ei.m_explColor[nextN] == EColor::GRAY) {
+        propagateUnsafeChildren(nCallee, nCaller, ei);
+        return true;
       }
     }
   }
@@ -194,7 +198,7 @@ void InterMemPreProc::preprocFunction(const Function *F) {
 
   GlobalAnalysis &ga = m_shadowDsa.getDsaAnalysis();
 
-  if(!ga.hasSummaryGraph(*F))
+  if (!ga.hasSummaryGraph(*F))
     return;
 
   Graph &buG = ga.getSummaryGraph(*F);
@@ -212,11 +216,12 @@ void InterMemPreProc::preprocFunction(const Function *F) {
                                unsafeSAS, simMap);
 
   // -- compute number of accesses to safe nodes
-  NodeSet explored; // track exploration, needs to be empty for every starting cell
+  NodeSet explored; // track exploration, needs to be emptied for every starting
+                    // cell
   RegionsMap &rm = m_frm[F];
 
   for (const Argument &a : F->args())
-    if (buG.hasCell(a)){
+    if (buG.hasCell(a)) {
       explored.clear();
       recProcessNode(buG.getCell(a), unsafeSAS, simMap, explored, rm);
     }
@@ -228,7 +233,7 @@ void InterMemPreProc::preprocFunction(const Function *F) {
     recProcessNode(c, unsafeSAS, simMap, explored, rm);
   }
 
-  if (buG.hasRetCell(*F)){
+  if (buG.hasRetCell(*F)) {
     explored.clear();
     recProcessNode(buG.getRetCell(*F), unsafeSAS, simMap, explored, rm);
   }
@@ -250,14 +255,14 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
   const Node *nFrom = cFrom.getNode();
   explored.insert(nFrom);
 
-  if (nFrom->size() == 0 || nFrom->isArray())
-    // the array was created but not accessed in this graph
+  if (nFrom->size() == 0)
+    // the node is not accessed in this graph
     return;
 
   const Cell &cTo = simMap.get(cFrom);
   const Node *nTo = cTo.getNode();
 
-  if (!cFrom.getNode()->types().empty() && isSafeNode(unsafeNodes, nTo))
+  if (isSafeNode(unsafeNodes, nTo) && !cFrom.getNode()->types().empty())
     rm[nTo] = rm[nTo] + cFrom.getNode()->types().size();
 
   if (nFrom->getLinks().empty())
