@@ -100,12 +100,15 @@ template <typename Range> Expr structTy(const Range &ty) {
 }
 
 inline Expr finiteMapTy(Expr valTy, Expr k) {
+  assert(!isOpX<FINITE_MAP_KEYS_TY>(valTy));
   return mk<FINITE_MAP_TY>(valTy, mk<FINITE_MAP_KEYS_TY>(k));
 }
 inline Expr finiteMapTy(Expr valTy, Expr k1, Expr k2) {
+    assert(!isOpX<FINITE_MAP_KEYS_TY>(valTy));
   return mk<FINITE_MAP_TY>(valTy, mk<FINITE_MAP_KEYS_TY>(k1, k2));
 }
 template <typename Range> Expr finiteMapTy(Expr valTy, const Range &ks) {
+    assert(!isOpX<FINITE_MAP_KEYS_TY>(valTy));
   // The keys already contain a type
   return mk<FINITE_MAP_TY>(valTy, mknary<FINITE_MAP_KEYS_TY>(ks));
 }

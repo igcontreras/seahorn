@@ -6,10 +6,6 @@
 
 #include "seahorn/Support/SeaDebug.h"
 
-// keep asserts of this file
-#undef NDEBUG
-#include <assert.h>
-
 using namespace expr;
 using namespace expr::op;
 
@@ -31,16 +27,15 @@ void mkVarsMap(Expr map, const ExprVector &keys, Expr vTy, ExprVector &newArgs,
                ExprVector &extra_unifs, ExprSet &evars) {
 
   Expr v, v_get;
-  ExprVector map_values(keys.size());
-  ExprVector map_keys(keys.size());
+  ExprVector map_values(keys.size()), map_keys(keys.size());
+  auto v_it = map_values.begin(), k_it = map_keys.begin();
   Expr keyTy = bind::rangeTy(bind::fname(keys[0]));
 
-  errs() << "--mkVarsMap" << *keyTy << "\n";
   for (auto k : keys) {
     Expr key = bind::mkConst(variant::tag(bind::name(bind::fname(map)), k), keyTy);
-    map_keys.push_back(key);
+    *k_it++ = key;
     v = mkVarGet(map, key, vTy);
-    map_values.push_back(v);
+    *v_it++ = v;
     evars.insert(v);
     evars.insert(key);
     newArgs.push_back(key);
@@ -93,6 +88,7 @@ static Expr mkFappArgsCore(Expr fapp, Expr newFdecl, ExprVector &extraUnifs,
                 extraUnifs, evars);
       // new arguments are added to `newArgs` in the function above
     } else {
+      assert(!bind::isFiniteMapConst(arg));
       newArgs.push_back(arg);
     }
   }

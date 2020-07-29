@@ -42,10 +42,7 @@ static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
     const Cell &nextC = *links.second;
     const Node *nextN = nextC.getNode();
 
-    auto next = ei.m_explColor.find(nextN);
-
-    bool explored =
-        next != ei.m_explColor.end() && next->getSecond() == EColor::BLACK;
+    bool explored = ((ei.m_explColor.count(nextN) > 0) && ei.m_explColor[nextN] == EColor::BLACK);
     bool marked_safe = isSafeNode(ei.m_calleeUnsafe, nextN);
 
     if (!(explored && !marked_safe)) {
@@ -65,17 +62,17 @@ static bool exploreNode(const Node &nCallee, const Node &nCaller,
     const Cell &nextC = *links.second;
     const Cell &nextCaller = ei.m_sm.get(nextC);
     const Node *nextN = nextC.getNode();
-    auto it = ei.m_explColor.find(nextN);
-    const Node *nextNCaller = nextCaller.getNode();
-    if (nextN->isArray()) { // encodes an object of unbounded size
+    if (nextN->isArray() || nextCaller.getNode()->isOffsetCollapsed()) { // encodes an object of unbounded size
       propagateUnsafeChildren(nCallee, nCaller, ei);
       return true;
-    } else if (it == ei.m_explColor.end() &&
+    } else {
+      if (ei.m_explColor.count(nextN) == 0 &&
                exploreNode(*nextN, *nextCaller.getNode(), ei))
-      return true;
-    else if (it != ei.m_explColor.end() && it->getSecond() == EColor::GRAY) {
-      propagateUnsafeChildren(nCallee, nCaller, ei);
-      return true;
+	return true;
+      else if (ei.m_explColor.count(nextN) > 0 && ei.m_explColor[nextN] == EColor::GRAY) {
+	propagateUnsafeChildren(nCallee, nCaller, ei);
+	return true;
+      }
     }
   }
   ei.m_explColor[&nCallee] = EColor::BLACK;
@@ -214,33 +211,27 @@ void InterMemPreProc::preprocFunction(const Function *F) {
   computeUnsafeNodesSimulation(*(const_cast<Graph *>(&buG)), *F, unsafeBU,
                                unsafeSAS, simMap);
 
-  // compute number of accesses to safe nodes
-  NodeSet explored;
+  // -- compute number of accesses to safe nodes
+  NodeSet explored; // track exploration, needs to be empty for every starting cell
   RegionsMap &rm = m_frm[F];
 
   for (const Argument &a : F->args())
-    if (buG.hasCell(a))
+    if (buG.hasCell(a)){
+      explored.clear();
       recProcessNode(buG.getCell(a), unsafeSAS, simMap, explored, rm);
+    }
 
-  explored.clear();
   for (auto &kv :
        boost::make_iterator_range(buG.globals_begin(), buG.globals_end())) {
     Cell &c = *kv.second;
+    explored.clear();
     recProcessNode(c, unsafeSAS, simMap, explored, rm);
   }
 
-  LOG(
-      "fmap_scalars", errs() << "processing scalars\n";
-      explored.clear();
-      for (auto &kv
-           : buG.scalars()) {
-        Cell &c = *kv.second;
-        recProcessNode(c, unsafeSAS, simMap, explored, rm);
-      });
-
-  explored.clear();
-  if (buG.hasRetCell(*F))
+  if (buG.hasRetCell(*F)){
+    explored.clear();
     recProcessNode(buG.getRetCell(*F), unsafeSAS, simMap, explored, rm);
+  }
 }
 
 unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
