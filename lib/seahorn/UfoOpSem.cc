@@ -18,10 +18,6 @@
 // For fmaps, move to a new .cc file
 #include "seahorn/Expr/ExprOpFiniteMap.hh"
 
-// keep asserts of this file
-#undef NDEBUG
-#include <assert.h>
-
 using namespace seadsa;
 namespace seahorn {
 // counters for encoding with InterProcMem option
@@ -902,14 +898,11 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       Expr idx = lookup(*I.getPointerOperand());
       if (idx && v) {
         Expr store;
-        if (bind::isArrayConst(m_inMem))
-          store = op::array::store(m_inMem, idx, v);
+        if (bind::isFiniteMapConst(m_inMem))
+	  store = op::finite_map::set(m_inMem, idx, v);
         else {
-          assert(bind::isFiniteMapConst(m_inMem));
-          store = op::finite_map::set(m_inMem, idx, v);
-          assert(bind::isFiniteMapConst(m_outMem));
+	  store = op::array::store(m_inMem, idx, v);
         }
-
         side(m_outMem, store, !ArrayGlobalConstraints);
       }
     }
@@ -1557,6 +1550,9 @@ void MemUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
 
     // errs() << "processing shadown mem: " << *I << "\n";
     Function *f_callee = ci->getCalledFunction();
+    if(f_callee == nullptr)
+      break;
+    
     if (f_callee->getName().equals("shadow.mem.arg.ref"))
       addCIArraySymbol(ci, csi.m_fparams[i], MemOpt::IN);
     else if (f_callee->getName().equals("shadow.mem.arg.mod")) {
@@ -1760,12 +1756,10 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 Expr FMapUfoOpSem::fmVariant(Expr e, const ExprVector &keys) {
 
   assert(keys.size() > 0);
+  Expr cTy = bind::rangeTy(bind::fname(e));
+  Expr vTy = bind::isArrayConst(e) ? sort::arrayValTy(cTy) : sort::finiteMapValTy(cTy);
 
-  Expr name = bind::fname(e);
-  Expr vTy = sort::arrayValTy(bind::rangeTy(name));
-  Expr finiteMapTy = sort::finiteMapTy(vTy, keys);
-
-  return bind::mkConst(variant::variant(m_copy_count++, e), finiteMapTy);
+  return bind::mkConst(variant::variant(m_copy_count++, e), sort::finiteMapTy(vTy, keys));
 }
 
 void FMapUfoOpSem::VCgenArg(const Cell &cArgCallee, Expr basePtr,

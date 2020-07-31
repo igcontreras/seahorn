@@ -5,10 +5,6 @@
 #include "seadsa/Mapper.hh"
 #include "seadsa/ShadowMem.hh"
 
-// keep asserts of this file
-#undef NDEBUG
-#include <assert.h>
-
 namespace seahorn {
 
 // preprocesor for vcgen with memory copies
