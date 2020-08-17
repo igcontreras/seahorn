@@ -13,10 +13,28 @@
 
 static llvm::cl::opt<bool>
     DumpHex("horn-bmc-hexdump",
-            llvm::cl::desc("Dump memory state using hexdump"),
-            cl::init(false));
+            llvm::cl::desc("Dump memory state using hexdump"), cl::init(false));
+static llvm::cl::opt<std::string>
+    BmcSmtTactic("horn-bmc-tactic", llvm::cl::desc("Z3 tactic to use for BMC"),
+                 cl::init("default"));
+static llvm::cl::opt<std::string>
+    BmcSmtLogic("horn-bmc-logic", llvm::cl::desc("SMT-LIB logic to pass to Z3"),
+                 cl::init("ALL"));
 
 namespace seahorn {
+BmcEngine::BmcEngine(OperationalSemantics &sem, EZ3 &zctx)
+    : m_sem(sem), m_efac(sem.efac()), m_result(boost::indeterminate),
+      m_cpg(nullptr), m_fn(nullptr), m_smt_solver(zctx, BmcSmtLogic.c_str()), m_ctxState(m_efac) {
+
+  z3n_set_param(":model.compact", false);
+  if (BmcSmtTactic != "default")
+    z3n_set_param(":tactic.default_tactic", BmcSmtTactic.c_str());
+
+  // ZParams<EZ3> params(zctx);
+  // params.set("tactic.default_tactic", "smtfd");
+  // m_smt_solver.set(params);
+}
+
 void BmcEngine::addCutPoint(const CutPoint &cp) {
   if (m_cps.empty()) {
     m_cpg = &cp.parent();
@@ -260,9 +278,16 @@ template <> raw_ostream &BmcTrace::print(raw_ostream &out) {
         out.changeColor(raw_ostream::RED);
       if (DumpHex && shadow_mem) {
         using HD = expr::hexDump::HexDump;
-        out << "  %" << I.getName() << "\n" << HD(v, 4);
-      }
-      else
+        using SHD = expr::hexDump::StructHexDump;
+        out << "  %" << I.getName() << "\n";
+
+        if (isOp<MK_STRUCT>(v)) {
+          out << SHD(v);
+        } else {
+          out << HD(v);
+        }
+
+      } else
         out << "  %" << I.getName() << " " << *v;
       const DebugLoc &dloc = I.getDebugLoc();
       if (dloc) {

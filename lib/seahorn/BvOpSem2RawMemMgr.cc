@@ -36,6 +36,17 @@ static llvm::cl::opt<bool> ExplicitSp0(
     llvm::cl::desc(
         "Set initial stack pointer (sp0) to an explicit numeric constant"),
     llvm::cl::init(false));
+
+static llvm::cl::opt<unsigned> MemCpyUnrollCount(
+    "horn-array-sym-memcpy-unroll-count",
+    llvm::cl::desc("When using array repr of memory; this sets the loop unroll "
+                   "count for symbolic memcpy"),
+    llvm::cl::init(16));
+
+static llvm::cl::opt<unsigned> MaxSymbAllocSz(
+    "horn-opsem-max-symb-alloc",
+    llvm::cl::desc("Maximum expected size of any symbolic allocation"),
+    llvm::cl::init(4096));
 namespace seahorn {
 namespace details {
 
@@ -67,9 +78,9 @@ RawMemManager::RawMemManager(Bv2OpSem &sem, Bv2OpSemContext &ctx,
     : OpSemMemManager(sem, ctx, ptrSz, wordSz, ignoreAlignment),
       m_freshPtrName(mkTerm<std::string>("sea.ptr", m_efac)), m_id(0) {
   if (MemAllocatorOpt == MemAllocatorKind::NORMAL_ALLOCATOR)
-    m_allocator = mkNormalOpSemAllocator(*this);
+    m_allocator = mkNormalOpSemAllocator(*this, MaxSymbAllocSz);
   else if (MemAllocatorOpt == MemAllocatorKind::STATIC_ALLOCATOR)
-    m_allocator = mkStaticOpSemAllocator(*this);
+    m_allocator = mkStaticOpSemAllocator(*this, MaxSymbAllocSz);
   assert(m_allocator);
 
   m_nullPtr = m_ctx.alu().si(0UL, ptrSzInBits());
@@ -82,7 +93,8 @@ RawMemManager::RawMemManager(Bv2OpSem &sem, Bv2OpSemContext &ctx,
   if (useLambdas)
     m_memRepr = std::make_unique<OpSemMemLambdaRepr>(*this, ctx);
   else
-    m_memRepr = std::make_unique<OpSemMemArrayRepr>(*this, ctx);
+    m_memRepr =
+        std::make_unique<OpSemMemArrayRepr>(*this, ctx, MemCpyUnrollCount);
 }
 
 /// \brief Creates a non-deterministic pointer that is aligned
@@ -575,9 +587,17 @@ Expr RawMemManager::MemSet(PtrTy ptr, Expr _val, unsigned len, MemValTy mem,
 
 /// \brief Executes symbolic memcpy with concrete length
 Expr RawMemManager::MemCpy(PtrTy dPtr, PtrTy sPtr, unsigned len,
-                           MemValTy memTrsfrRead, uint32_t align) {
-  return m_memRepr->MemCpy(dPtr, sPtr, len, memTrsfrRead, wordSzInBytes(),
-                           ptrSort(), align);
+                           MemValTy memTrsfrRead, MemValTy memRead,
+                           uint32_t align) {
+  return m_memRepr->MemCpy(dPtr, sPtr, len, memTrsfrRead, memRead,
+                           wordSzInBytes(), ptrSort(), align);
+}
+
+Expr RawMemManager::MemCpy(PtrTy dPtr, PtrTy sPtr, Expr len,
+                           MemValTy memTrsfrRead, MemValTy memRead,
+                           uint32_t align) {
+  return m_memRepr->MemCpy(dPtr, sPtr, len, memTrsfrRead, memRead,
+                           wordSzInBytes(), ptrSort(), align);
 }
 
 /// \brief Executes symbolic memcpy from physical memory with concrete length

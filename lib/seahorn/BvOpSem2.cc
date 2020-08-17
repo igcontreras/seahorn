@@ -55,11 +55,11 @@ static llvm::cl::opt<bool> UseExtraWideMemory(
 
 static llvm::cl::opt<unsigned>
     WordSize("horn-bv2-word-size",
-             llvm::cl::desc("Word size in bytes: 1, 4, 8"), cl::init(4));
+             llvm::cl::desc("Word size in bytes: 0 - auto, 1, 4, 8"), cl::init(0));
 
 static llvm::cl::opt<unsigned>
-    PtrSize("horn-bv2-ptr-size", llvm::cl::desc("Pointer size in bytes: 4, 8"),
-            cl::init(4), cl::Hidden);
+    PtrSize("horn-bv2-ptr-size", llvm::cl::desc("Pointer size in bytes: 0 - auto, 4, 8"),
+            cl::init(0), cl::Hidden);
 
 static llvm::cl::opt<bool> EnableUniqueScalars2(
     "horn-bv2-singleton-aliases",
@@ -1610,8 +1610,9 @@ public:
     if (dstAddr && srcAddr) {
       if (const ConstantInt *ci = dyn_cast<const ConstantInt>(&length)) {
         res = m_ctx.MemCpy(dstAddr, srcAddr, ci->getZExtValue(), alignment);
-      } else
-        LOG("opsem", WARN << "unsupported memcpy with symbolic length";);
+      } else {
+        res = m_ctx.MemCpy(dstAddr, srcAddr, len, alignment);
+      }
     }
 
     if (!res)
@@ -1775,14 +1776,20 @@ Bv2OpSemContext::Bv2OpSemContext(Bv2OpSem &sem, SymStore &values,
   m_shouldSimplify = SimplifyExpr;
   m_alu = mkBvOpSemAlu(*this);
   OpSemMemManager *mem = nullptr;
+
+  unsigned ptrSize = PtrSize == 0 ? m_sem.getDataLayout().getPointerSize(0) : PtrSize;
+  unsigned wordSize = WordSize == 0 ? ptrSize : WordSize;
+
+  LOG("opsem", INFO << "pointer size: " << ptrSize << ", word size: " << wordSize;);
+
   if (UseFatMemory)
-    mem = mkFatMemManager(m_sem, *this, PtrSize, WordSize, UseLambdas);
+    mem = mkFatMemManager(m_sem, *this, ptrSize, wordSize, UseLambdas);
   else if (UseWideMemory) {
-    mem = mkWideMemManager(m_sem, *this, PtrSize, WordSize, UseLambdas);
+    mem = mkWideMemManager(m_sem, *this, ptrSize, wordSize, UseLambdas);
   } else if (UseExtraWideMemory) {
-    mem = mkExtraWideMemManager(m_sem, *this, PtrSize, WordSize, UseLambdas);
+    mem = mkExtraWideMemManager(m_sem, *this, ptrSize, wordSize, UseLambdas);
   } else {
-    mem = mkRawMemManager(m_sem, *this, PtrSize, WordSize, UseLambdas);
+    mem = mkRawMemManager(m_sem, *this, ptrSize, wordSize, UseLambdas);
   }
   assert(mem);
   setMemManager(mem);
@@ -1907,8 +1914,29 @@ Expr Bv2OpSemContext::MemCpy(Expr dPtr, Expr sPtr, unsigned len,
   assert(getMemReadRegister());
   assert(getMemWriteRegister());
   Expr mem = read(getMemTrsfrReadReg());
-  Expr res = m_memManager->MemCpy(dPtr, sPtr, len, mem, align);
-  write(getMemWriteRegister(), res);
+  Expr dstMemIn = read(getMemReadRegister());
+  Expr res = m_memManager->MemCpy(dPtr, sPtr, len, mem, dstMemIn, align);
+  if (res)
+    write(getMemWriteRegister(), res);
+  else {
+    LOG("opsem", WARN << "memcpy with concrete length treated as noop");
+  }
+  return res;
+}
+
+Expr Bv2OpSemContext::MemCpy(Expr dPtr, Expr sPtr, Expr len, uint32_t align) {
+  assert(m_memManager);
+  assert(getMemTrsfrReadReg());
+  assert(getMemReadRegister());
+  assert(getMemWriteRegister());
+  Expr mem = read(getMemTrsfrReadReg());
+  Expr dstMemIn = read(getMemReadRegister());
+  Expr res = m_memManager->MemCpy(dPtr, sPtr, len, mem, dstMemIn, align);
+  if (res) {
+    write(getMemWriteRegister(), res);
+  } else {
+    LOG("opsem", WARN << "memcpy with symbolic length treated as noop";);
+  }
   return res;
 }
 
@@ -2014,7 +2042,7 @@ Expr Bv2OpSemContext::mkRegister(const llvm::Instruction &inst) {
     // the pseudo-assignment
     else { //(true /*m_trackLvl >= MEM*/) {
       reg = bind::mkConst(v, mkMemRegisterSort(inst));
-    }
+  }
   } else {
     const Type &ty = *inst.getType();
     switch (ty.getTypeID()) {

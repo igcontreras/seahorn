@@ -33,11 +33,11 @@ seahorn::PathBmcTrace seahorn::PathBmcEngine::getTrace() {
 #include "seahorn/Support/Stats.hh"
 #include "seahorn/UfoOpSem.hh"
 
-#include "clam/AbstractDomain.hh"
 #include "clam/CfgBuilder.hh"
 #include "clam/Clam.hh"
+#include "clam/CrabDomain.hh"
+#include "clam/CrabDomainParser.hh"
 #include "clam/HeapAbstraction.hh"
-#include "clam/DummyHeapAbstraction.hh"
 #include "clam/SeaDsaHeapAbstraction.hh"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/CallGraph.h"
@@ -69,14 +69,14 @@ seahorn::PathBmcTrace seahorn::PathBmcEngine::getTrace() {
  *        4.3.1 If sat then return "SAT"
  *        4.3.2 Otherwise, compute blocking clause to refine the boolean
  *              abstraction and go to 4.
- * 5. return "UNSAT" 
- * 
+ * 5. return "UNSAT"
+ *
  *  The current implementation is VCGen dependent. In particular, the
  *  functions:
- *  - gen_path_cond_from_ai_cex
- *  - bool_abstraction
- * 
- *  Moreover, gen_path_cond_from_ai_cex also requires knowledge
+ *  - genPathCondFromCrabCex
+ *  - boolAbstraction
+ *
+ *  Moreover, genPathCondFromCrabCex also requires knowledge
  *  about how the translation from LLVM bitcode to Crab is done.
  **/
 
@@ -85,59 +85,57 @@ namespace seahorn {
 solver::SolverKind SmtSolver;
 bool UseCrabGlobalInvariants;
 bool UseCrabForSolvingPaths;
-clam::CrabDomain CrabDom;
+clam::CrabDomain::Type CrabDom;
 bool LayeredCrabSolving;
 path_bmc::MucMethodKind MucMethod;
 unsigned PathTimeout;
 unsigned MucTimeout;
 std::string SmtOutDir;
-}
+} // namespace seahorn
 
 static llvm::cl::opt<seahorn::solver::SolverKind, true>
     XSmtSolver("horn-bmc-smt-solver",
-              llvm::cl::values(clEnumValN(seahorn::solver::SolverKind::Z3, "z3",
-                                          "z3 SMT solver"),
-                               clEnumValN(seahorn::solver::SolverKind::YICES2,
-                                          "yices2", "Yices2 SMT solver")),
-              llvm::cl::desc("Choose SMT solver used for the Path Bmc engine"),
-	      llvm::cl::location(seahorn::SmtSolver),
-              llvm::cl::init(seahorn::solver::SolverKind::Z3));
+               llvm::cl::values(clEnumValN(seahorn::solver::SolverKind::Z3,
+                                           "z3", "z3 SMT solver"),
+                                clEnumValN(seahorn::solver::SolverKind::YICES2,
+                                           "yices2", "Yices2 SMT solver")),
+               llvm::cl::desc("Choose SMT solver used for the Path Bmc engine"),
+               llvm::cl::location(seahorn::SmtSolver),
+               llvm::cl::init(seahorn::solver::SolverKind::Z3));
 
 static llvm::cl::opt<bool, true> XUseCrabGlobalInvariants(
     "horn-bmc-crab-invariants",
     llvm::cl::desc("Load crab invariants into the Path Bmc engine"),
-    llvm::cl::location(seahorn::UseCrabGlobalInvariants),
-    llvm::cl::init(true));
+    llvm::cl::location(seahorn::UseCrabGlobalInvariants), llvm::cl::init(true));
 
 static llvm::cl::opt<bool, true> XUseCrabForSolvingPaths(
     "horn-bmc-crab",
     llvm::cl::desc("Use of Crab to solve paths in Path Bmc engine"),
-    llvm::cl::location(seahorn::UseCrabForSolvingPaths),    
-    llvm::cl::init(false));
+    llvm::cl::location(seahorn::UseCrabForSolvingPaths), llvm::cl::init(false));
 
-static llvm::cl::opt<clam::CrabDomain, true> XCrabDom(
-    "horn-bmc-crab-dom",
-    llvm::cl::desc("Crab Domain used by the Path Bmc engine"),
-    llvm::cl::values(clEnumValN(clam::INTERVALS, "int",
-                                "Classical interval domain (default)"),
-                     clEnumValN(clam::ZONES_SPLIT_DBM, "zones",
-                                "Zones domain."),
-                     clEnumValN(clam::TERMS_INTERVALS, "term-int",
-                                "Intervals with uninterpreted functions."),
-                     clEnumValN(clam::TERMS_ZONES, "rtz",
-                                "Reduced product of term-dis-int and zones."),
-                     clEnumValN(clam::WRAPPED_INTERVALS, "w-int",
-                                "Wrapped interval domain")),
-    llvm::cl::location(seahorn::CrabDom),
-    llvm::cl::init(clam::ZONES_SPLIT_DBM));
+static llvm::cl::opt<clam::CrabDomain::Type, true, clam::CrabDomainParser>
+    XCrabDom("horn-bmc-crab-dom",
+             llvm::cl::desc("Crab Domain used by the Path Bmc engine"),
+             llvm::cl::values(
+                 clEnumValN(clam::CrabDomain::INTERVALS, "int",
+                            "Classical interval domain (default)"),
+                 clEnumValN(clam::CrabDomain::ZONES_SPLIT_DBM, "zones",
+                            "Zones domain."),
+                 clEnumValN(clam::CrabDomain::TERMS_INTERVALS, "term-int",
+                            "Intervals with uninterpreted functions."),
+                 clEnumValN(clam::CrabDomain::TERMS_ZONES, "rtz",
+                            "Reduced product of term-dis-int and zones."),
+                 clEnumValN(clam::CrabDomain::WRAPPED_INTERVALS, "w-int",
+                            "Wrapped interval domain")),
+             llvm::cl::location(seahorn::CrabDom),
+             llvm::cl::init(clam::CrabDomain::ZONES_SPLIT_DBM));
 
 // It has only effect if UseCrabForSolvingPaths is enabled.
 static llvm::cl::opt<bool, true> XLayeredCrabSolving(
     "horn-bmc-crab-layered-solving",
     llvm::cl::desc("Try only-boolean reasoning before using "
                    "--horn-bmc-crab-dom to prove path unsatisfiability"),
-    llvm::cl::location(seahorn::LayeredCrabSolving),
-    llvm::cl::init(false));
+    llvm::cl::location(seahorn::LayeredCrabSolving), llvm::cl::init(false));
 
 static llvm::cl::opt<enum seahorn::path_bmc::MucMethodKind, true> XMucMethod(
     "horn-bmc-muc",
@@ -158,20 +156,18 @@ static llvm::cl::opt<unsigned, true> XPathTimeout(
     "horn-bmc-path-timeout",
     llvm::cl::desc(
         "Timeout (sec) for SMT solving a path formula in Path Bmc engine"),
-    llvm::cl::location(seahorn::PathTimeout),
-    llvm::cl::init(1800u));
+    llvm::cl::location(seahorn::PathTimeout), llvm::cl::init(1800u));
 
 static llvm::cl::opt<unsigned, true> XMucTimeout(
     "horn-bmc-muc-timeout",
     llvm::cl::desc("Timeout (sec) for SMT query during MUC in Path Bmc engine"),
-    llvm::cl::location(seahorn::MucTimeout),
-    llvm::cl::init(5u));
+    llvm::cl::location(seahorn::MucTimeout), llvm::cl::init(5u));
 
 static llvm::cl::opt<std::string, true> XSmtOutDir(
     "horn-bmc-smt-outdir",
     llvm::cl::desc("Directory to dump path formulas in SMT-LIB format"),
-    llvm::cl::location(seahorn::SmtOutDir),
-    llvm::cl::init(""), llvm::cl::value_desc("directory"));
+    llvm::cl::location(seahorn::SmtOutDir), llvm::cl::init(""),
+    llvm::cl::value_desc("directory"));
 
 namespace seahorn {
 
@@ -189,22 +185,30 @@ static llvm::raw_ostream &get_os(bool show_time = false) {
   return *result;
 }
 
-void PathBmcEngine::initialize_ai() {
+void PathBmcEngine::initializeCrab() {
 
   // -- Compute live symbols so that invariant variables exclude
   //    dead variables.
   m_ls.reset(new LiveSymbols(*m_fn, sem().efac(), sem()));
   m_ls->run();
 
-  // -- Build the CFG 
-  clam::CrabBuilderParams  cfg_builder_params;
+  // -- Set parameters for CFG
+  clam::CrabBuilderParams cfg_builder_params;
   cfg_builder_params.simplify = false;
-  cfg_builder_params.enable_memory_ssa();
-  cfg_builder_params.set_array_precision();
+  cfg_builder_params.setPrecision(clam::CrabBuilderPrecision::SINGLETON_MEM);
+  LOG("bmc-crab-cfg", cfg_builder_params.print_cfg = true;);
   // TODO/FIXME: it should be sync with horn-bv-singleton-aliases
   cfg_builder_params.lower_singleton_aliases = true;
-  m_cfg_builder_man.reset(new clam::CrabBuilderManager(cfg_builder_params, m_tli, m_sm));
-  
+
+  // -- Build an instance of clam HeapAbstraction from ShadowMem
+  const Module &M = *(m_fn->getParent());
+  std::unique_ptr<clam::HeapAbstraction> heap_abs =
+      std::make_unique<clam::SeaDsaHeapAbstraction>(M, m_sm.getDsaAnalysis());
+
+  // -- Create a CFG manager
+  m_cfg_builder_man.reset(new clam::CrabBuilderManager(
+      cfg_builder_params, m_tli, std::move(heap_abs)));
+
   // -- Initialize crab for solving paths
   if (UseCrabForSolvingPaths) {
     m_crab_path_solver.reset(new clam::IntraClam(*m_fn, *m_cfg_builder_man));
@@ -213,7 +217,7 @@ void PathBmcEngine::initialize_ai() {
 
 // Run whole-program crab analysis and assert those invariants into
 // the solver that keeps the precise encoding.
-void PathBmcEngine::add_global_invariants(expr_invariants_map_t &invariants) {
+void PathBmcEngine::addGlobalCrabInvariants(expr_invariants_map_t &invariants) {
   if (UseCrabGlobalInvariants) {
     LOG("bmc", get_os(true) << "Begin running crab analysis\n";);
     Stats::resume("BMC path-based: whole-program crab analysis");
@@ -221,21 +225,20 @@ void PathBmcEngine::add_global_invariants(expr_invariants_map_t &invariants) {
 
     clam::AnalysisParams params;
     params.dom = CrabDom;
-    typename clam::IntraClam::assumption_map_t empty_assumptions;
-    crab_analysis.analyze(params, empty_assumptions);
+    crab_analysis.analyze(params);
     Stats::stop("BMC path-based: whole-program crab analysis");
     LOG("bmc", get_os(true) << "End running crab analysis\n";);
 
     LOG("bmc", get_os(true) << "Begin loading of crab global invariants\n";);
     Stats::resume("BMC path-based: loading of crab global invariants");
-    load_invariants(crab_analysis, invariants);
+    loadCrabInvariants(crab_analysis, invariants);
     // Assumption: the program has been fully unrolled so there is
     // exactly two cutpoint nodes (entry and exit). We use the symbolic
     // store of the exit node.
     auto &states = getStates();
     if (states.size() == 2) {
       SymStore &s = states[1];
-      assert_invariants(invariants, s);
+      assertCrabInvariants(invariants, s);
     }
     Stats::stop("BMC path-based: loading of crab global invariants");
     LOG("bmc", get_os(true) << "End loading of crab invariants\n";);
@@ -243,7 +246,7 @@ void PathBmcEngine::add_global_invariants(expr_invariants_map_t &invariants) {
 }
 
 /* Load clam invariants into the out map */
-void PathBmcEngine::load_invariants(
+void PathBmcEngine::loadCrabInvariants(
     const clam::IntraClam &crab,
     DenseMap<const BasicBlock *, ExprVector> &out) {
 
@@ -251,18 +254,22 @@ void PathBmcEngine::load_invariants(
   for (const BasicBlock &bb : *m_fn) {
 
     // -- Get invariants from crab as crab linear constraints
-    auto pre = crab.get_pre(&bb);
-    if (!pre)
+    llvm::Optional<clam::clam_abstract_domain> preOpt = crab.getPre(&bb);
+    if (!preOpt.hasValue()) {
       continue;
-    clam::lin_cst_sys_t inv_csts = pre->to_linear_constraints();
-    if (inv_csts.is_true())
+    }
+    if (preOpt.getValue().is_top()) {
       continue;
-
+    }
     // -- Translate crab linear constraints to ExprVector
     const ExprVector &live = m_ls->live(&bb);
-    LinConsToExpr conv(m_cfg_builder_man->get_heap_abstraction(), *m_fn, live);
+    LinConsToExpr conv(m_cfg_builder_man->getHeapAbstraction(), *m_fn, live);
 
     ExprVector res;
+    // XXX: this will lose precision if the domain is not convex or
+    // contain array constraints
+    clam::lin_cst_sys_t inv_csts =
+        preOpt.getValue().to_linear_constraint_system();
     for (auto cst : inv_csts) {
       // XXX: will convert from crab semantics to BMC semantics.
       auto it = cache.find(cst);
@@ -292,7 +299,8 @@ void PathBmcEngine::load_invariants(
 
     if (!res.empty()) {
       out.insert({&bb, res});
-      LOG("bmc-ai", errs() << "Global invariants at " << bb.getName() << ":\n";
+      LOG(
+          "bmc-ai", errs() << "Global invariants at " << bb.getName() << ":\n";
           if (res.empty()) { errs() << "\ttrue\n"; } else {
             for (auto e : res) {
               errs() << "\t" << *e << "\n";
@@ -303,8 +311,8 @@ void PathBmcEngine::load_invariants(
 }
 
 /* Assert the invariants as formulas in m_precise_side */
-void PathBmcEngine::assert_invariants(const expr_invariants_map_t &invariants,
-                                      SymStore &s) {
+void PathBmcEngine::assertCrabInvariants(
+    const expr_invariants_map_t &invariants, SymStore &s) {
 
   // s.print(errs());
   // Apply the symbolic store
@@ -365,7 +373,7 @@ static bool isCriticalEdge(const BasicBlock *src, const BasicBlock *dst) {
  * LLVM bitcode is translated into Crab CFGs. These are the current
  * assumptions:
  *
- *   1) A binary operation or array read/write s at bb is translated by VCGen 
+ *   1) A binary operation or array read/write s at bb is translated by VCGen
  *      to (bb => s)
  *   2) Most Crab assignments "x=y" at bj are coming from PHI nodes.
  *      Given "bi: x = PHI (y, bj) (...)" VCGen encodes it into:
@@ -373,41 +381,41 @@ static bool isCriticalEdge(const BasicBlock *src, const BasicBlock *dst) {
  *   3) Crab "assume(cst)" at bbi is coming from "f = ICMP cst at bb, BR f bbi,
  *      bbj", VCGen produces:
  *        ((bb and (bb and bbi)) => f)
- * 
+ *
  *   We need to take special care if an edge is critical:
  *       - a PHI node is translated into bj and tuple(bi,bj) => x=y
  *       - a branch is translated into b and tuple(bb,bbi) => f
  */
-bool PathBmcEngine::gen_path_cond_from_ai_cex(
-    PathBmcTrace &cex,    					      
-    const std::vector<crab_statement_t> &cex_stmts,
+bool PathBmcEngine::genPathCondFromCrabCex(
+    PathBmcTrace &cex, const std::vector<clam::statement_t *> &cex_stmts,
     ExprSet /*std::set<Expr, lessExpr>*/ &path_cond) {
 
   LOG("bmc-crab-blocking-clause",
       errs() << "\nGenerating blocking clause from Crab cex ...\n";);
 
-  const clam::CfgBuilder& cfg_builder = *m_cfg_builder_man->get_cfg_builder(*m_fn);  
+  const clam::CfgBuilder &cfg_builder =
+      *m_cfg_builder_man->getCfgBuilder(*m_fn);
   for (auto it = cex_stmts.begin(); it != cex_stmts.end(); ++it) {
     auto s = *it;
-    LOG("bmc-crab-blocking-clause", crab::outs() << *s.m_s << "\n";);
-    if (s.m_s->is_havoc()) {
+    LOG("bmc-crab-blocking-clause", crab::outs() << *s << "\n";);
+    if (s->is_havoc()) {
       // The only reason a havoc statement is relevant is if we have something
       // like x:=*; assume(cond(x)); assert(cond(x)) Therefore, we can skip
       // it.
       continue;
     } else if ( // enumerate all statements here so that we can know if we
                 // miss one
-        s.m_s->is_bin_op() || s.m_s->is_int_cast() || s.m_s->is_select() ||
-        s.m_s->is_bool_bin_op() || s.m_s->is_bool_assign_cst() ||
-	s.m_s->is_assume() || s.m_s->is_bool_assume() ||
-	// array writes
-	s.m_s->is_arr_write() || 	
-	// array reads
-	s.m_s->is_arr_read() || 
+        s->is_bin_op() || s->is_int_cast() || s->is_select() ||
+        s->is_bool_bin_op() || s->is_bool_assign_cst() || s->is_assume() ||
+        s->is_bool_assume() ||
+        // array writes
+        s->is_arr_write() ||
+        // array reads
+        s->is_arr_read() ||
         // array initializations are not coming from branches
-        s.m_s->is_arr_init()) {
-      if (s.m_parent.is_edge()) {
-        auto p = s.m_parent.get_edge();
+        s->is_arr_init()) {
+      if (s->get_parent()->label().is_edge()) {
+        auto p = s->get_parent()->label().get_edge();
         Expr src = sem().symb(*p.first);
         Expr dst = sem().symb(*p.second);
 
@@ -428,16 +436,16 @@ bool PathBmcEngine::gen_path_cond_from_ai_cex(
         }
         path_cond.insert(eval(edge));
       } else {
-        const BasicBlock *BB = s.m_parent.get_basic_block();
+        const BasicBlock *BB = s->get_parent()->label().get_basic_block();
         path_cond.insert(eval(sem().symb(*BB)));
-        LOG("bmc-crab-blocking-clause", errs()
-                                            << "\tbasic block " << BB->getName()
-	                                    << ": " << *(sem().symb(*BB)) << "\n";);
+        LOG("bmc-crab-blocking-clause", errs() << "\tbasic block "
+                                               << BB->getName() << ": "
+                                               << *(sem().symb(*BB)) << "\n";);
       }
       continue;
-    } else if (s.m_s->is_assign() || s.m_s->is_bool_assign_var() ||
-	       s.m_s->is_arr_assign()) {
-      /* 
+    } else if (s->is_assign() || s->is_bool_assign_var() ||
+               s->is_arr_assign()) {
+      /*
        * If there is an assignment then it might be originated from a
        * PHI node.  In that case, it's not sound just to consider the
        * block bb where the PHI node is defined but instead, we need
@@ -447,56 +455,58 @@ bool PathBmcEngine::gen_path_cond_from_ai_cex(
       // To record the edge
       const BasicBlock *src_BB = nullptr;
       const BasicBlock *dst_BB = nullptr;
-      
-      if (s.m_s->is_assign()) {
+
+      if (s->is_assign()) {
         typedef typename clam::cfg_ref_t::basic_block_t::assign_t assign_t;
-        auto assign = static_cast<const assign_t *>(s.m_s);
+        auto assign = static_cast<const assign_t *>(s);
         if (boost::optional<const llvm::Value *> lhs =
                 assign->lhs().name().get()) {
-	  // The crab assignment is in the incoming block of PHI
-          if (const PHINode* PHI = dyn_cast<PHINode>(*lhs)) {
-	    src_BB = s.m_parent.get_basic_block();
-	    if (!src_BB) {
-	      src_BB = s.m_parent.get_edge().first;
-	      assert(src_BB);
-	    }
-	    dst_BB = PHI->getParent();
-	  }
+          // The crab assignment is in the incoming block of PHI
+          if (const PHINode *PHI = dyn_cast<PHINode>(*lhs)) {
+            src_BB = s->get_parent()->label().get_basic_block();
+            if (!src_BB) {
+              src_BB = s->get_parent()->label().get_edge().first;
+              assert(src_BB);
+            }
+            dst_BB = PHI->getParent();
+          }
         }
-      } else if (s.m_s->is_bool_assign_var()) {
-	typedef typename clam::cfg_ref_t::basic_block_t::bool_assign_var_t
-	  bool_assign_var_t;
-	auto assign = static_cast<const bool_assign_var_t *>(s.m_s);
-	if (boost::optional<const llvm::Value *> lhs =
-	    assign->lhs().name().get()) {
-          if (const PHINode* PHI = dyn_cast<PHINode>(*lhs)) {
-	    // The crab assignment is in the incoming block of PHI
-	    src_BB = s.m_parent.get_basic_block();
-	    if (!src_BB) {
-	      src_BB = s.m_parent.get_edge().first;
-	      assert(src_BB);
-	    }
-	    dst_BB = PHI->getParent();
-	  }
-	}
-      } else if (s.m_s->is_arr_assign()) {
-	typedef typename clam::cfg_ref_t::basic_block_t::arr_assign_t arr_assign_t;
-	auto assign = static_cast<const arr_assign_t*>(s.m_s);
-	if (boost::optional<const llvm::Value *> lhs = assign->lhs().name().get()) {
-	  if (const PHINode *PHI = dyn_cast<PHINode>(*lhs)) {
-	    // The crab array assignment is in the incoming block of PHI
-	    src_BB = s.m_parent.get_basic_block();
-	    if (!src_BB) {
-	      src_BB = s.m_parent.get_edge().first;
-	      assert(src_BB);
-	    }
-	    dst_BB = PHI->getParent();
-	  }
-	}
+      } else if (s->is_bool_assign_var()) {
+        typedef typename clam::cfg_ref_t::basic_block_t::bool_assign_var_t
+            bool_assign_var_t;
+        auto assign = static_cast<const bool_assign_var_t *>(s);
+        if (boost::optional<const llvm::Value *> lhs =
+                assign->lhs().name().get()) {
+          if (const PHINode *PHI = dyn_cast<PHINode>(*lhs)) {
+            // The crab assignment is in the incoming block of PHI
+            src_BB = s->get_parent()->label().get_basic_block();
+            if (!src_BB) {
+              src_BB = s->get_parent()->label().get_edge().first;
+              assert(src_BB);
+            }
+            dst_BB = PHI->getParent();
+          }
+        }
+      } else if (s->is_arr_assign()) {
+        typedef
+            typename clam::cfg_ref_t::basic_block_t::arr_assign_t arr_assign_t;
+        auto assign = static_cast<const arr_assign_t *>(s);
+        if (boost::optional<const llvm::Value *> lhs =
+                assign->lhs().name().get()) {
+          if (const PHINode *PHI = dyn_cast<PHINode>(*lhs)) {
+            // The crab array assignment is in the incoming block of PHI
+            src_BB = s->get_parent()->label().get_basic_block();
+            if (!src_BB) {
+              src_BB = s->get_parent()->label().get_edge().first;
+              assert(src_BB);
+            }
+            dst_BB = PHI->getParent();
+          }
+        }
       }
 
       if (src_BB && dst_BB) {
-	// XXX assignments originated from PHI nodes
+        // XXX assignments originated from PHI nodes
         Expr src = sem().symb(*src_BB);
         Expr dst = sem().symb(*dst_BB);
         Expr edge;
@@ -504,54 +514,53 @@ bool PathBmcEngine::gen_path_cond_from_ai_cex(
           edge = path_bmc::expr_utils::mkEdge(src, dst);
           LOG("bmc-crab-blocking-clause",
               errs() << "\tCritical edge for PHI Node between "
-                     << src_BB->getName() << " and " << dst_BB->getName() << ": "
-                     << *edge << "\n";);
+                     << src_BB->getName() << " and " << dst_BB->getName()
+                     << ": " << *edge << "\n";);
           path_cond.insert(eval(src));
         } else {
           edge = mk<AND>(src, dst);
           LOG("bmc-crab-blocking-clause",
               errs() << "\tNon-critical edge for PHI Node between "
-                     << src_BB->getName() << " and " << dst_BB->getName() << ": "
-                     << *edge << "\n";);
+                     << src_BB->getName() << " and " << dst_BB->getName()
+                     << ": " << *edge << "\n";);
         }
         path_cond.insert(eval(edge));
         continue;
       } else {
         // XXX assignment not originated from a PHI node
-        assert(!s.m_parent.is_edge());
-        const BasicBlock *BB = s.m_parent.get_basic_block();
+        assert(!s->get_parent()->label().is_edge());
+        const BasicBlock *BB = s->get_parent()->label().get_basic_block();
         assert(BB);
         path_cond.insert(eval(sem().symb(*BB)));
-        LOG("bmc-crab-blocking-clause", errs() << "\tbasic block for assignment "
-                                               << BB->getName()
-	                                       << ": " << *(sem().symb(*BB)) << "\n";);
+        LOG("bmc-crab-blocking-clause",
+            errs() << "\tbasic block for assignment " << BB->getName() << ": "
+                   << *(sem().symb(*BB)) << "\n";);
         continue;
       }
     }
-    
+
     // sanity check: this should not happen.
-    // crab::outs() << *s.m_s << "\n";
+    // crab::outs() << *s << "\n";
     ERR << "PathBmc::gen_path_cond_from_cex: unsupported crab statement";
     return false;
   } // end for
   return true;
 }
 
-
-/* 
+/*
  * Evaluate an expression using the symbolic store.
  * Needed when Crab adds blocking clauses into the boolean abstraction.
  * Assume that encode() has been executed already.
  */
 Expr PathBmcEngine::eval(Expr e) {
   // XXX: since PathBmc only works with loop-free programs we should
-  // have only two cutpoint nodes. 
+  // have only two cutpoint nodes.
   assert(getCps().size() == 2);
-  
+
   // XXX: this is the symbolic store we care about it (ensured by
   // encode()).
   auto &states = getStates();
-  SymStore&s = states[1]; 
+  SymStore &s = states[1];
 
   Expr v = s.eval(e);
   if (v != e) {
@@ -571,19 +580,18 @@ Expr PathBmcEngine::eval(Expr e) {
  * Given a sequence of basic blocks, extract the crab invariants per
  * block and convert it to Expr format.
  */
-void PathBmcEngine::extract_post_conditions_from_ai_cex(
+void PathBmcEngine::extractPostConditionsFromCrabCex(
     const std::vector<const llvm::BasicBlock *> &cex,
-    const crab_invariants_map_t &invariants,
-    expr_invariants_map_t &out) {
-  
+    const crab_invariants_map_t &invariants, expr_invariants_map_t &out) {
+
   const LiveSymbols &ls = *m_ls;
   const Function &fn = *m_fn;
   ExprFactory &efac = sem().efac();
-  
+
   auto get_crab_linear_constraints = [&invariants](const BasicBlock *b) {
     auto it = invariants.find(b);
     if (it != invariants.end()) {
-      return it->second->to_linear_constraints();
+      return it->second.to_linear_constraint_system();
     } else {
       // if the block is not found then the value is assumed to be
       // bottom.
@@ -594,10 +602,11 @@ void PathBmcEngine::extract_post_conditions_from_ai_cex(
 
   for (const BasicBlock *b : cex) {
     const ExprVector &live = ls.live(b);
-    // XXX: this will lose precision if the domain is not convex.
+    // XXX: this will lose precision if the domain is not convex or
+    // contain array constraints
     clam::lin_cst_sys_t csts = get_crab_linear_constraints(b);
     ExprVector f;
-    LinConsToExpr conv(m_cfg_builder_man->get_heap_abstraction(), fn, live);
+    LinConsToExpr conv(m_cfg_builder_man->getHeapAbstraction(), fn, live);
     for (auto cst : csts) {
       // XXX: Convert to Expr using Crab semantics (linear integer
       // arithmetic).
@@ -626,12 +635,11 @@ void PathBmcEngine::extract_post_conditions_from_ai_cex(
 
    Modify m_path_cond.
  */
-bool PathBmcEngine::path_encoding_and_solve_with_ai(
-      PathBmcTrace &cex,
-      bool keep_path_constraints,
-      crab_invariants_map_t &crab_path_constraints,
-      expr_invariants_map_t &path_constraints) {
-  
+bool PathBmcEngine::pathEncodingAndSolveWithCrab(
+    PathBmcTrace &cex, bool keep_path_constraints,
+    crab_invariants_map_t &crab_path_constraints,
+    expr_invariants_map_t &path_constraints) {
+
   using namespace clam;
   std::vector<const llvm::BasicBlock *> cex_blocks;
   LOG("bmc-details", errs() << "Trace=";);
@@ -639,7 +647,7 @@ bool PathBmcEngine::path_encoding_and_solve_with_ai(
     cex_blocks.push_back(cex.bb(i));
     LOG("bmc-details", errs() << cex.bb(i)->getName() << "  ";);
   }
-  
+
   LOG("bmc-details", errs() << "\n";);
 
   // -- crab parameters
@@ -649,42 +657,43 @@ bool PathBmcEngine::path_encoding_and_solve_with_ai(
   // -- run crab on the path:
   //    If bottom is inferred then cex_relevant_stmts is a minimal subset of
   //    statements along the path that still implies bottom.
-  std::vector<crab_statement_t> cex_relevant_stmts;
+  std::vector<clam::statement_t *> cex_relevant_stmts;
 
   LOG("bmc-crab", keep_path_constraints = true;);
   bool res;
   // currently enabled only for debugging because path_constraints is
   // unused.
-  if (keep_path_constraints) { 
+  if (keep_path_constraints) {
     // crab_invariants contains the forward invariants for the cex:
     // one abstract state per cex's block
     crab_invariants_map_t crab_invariants;
     res =
-        m_crab_path_solver->path_analyze(params, cex_blocks, LayeredCrabSolving,
-                                         cex_relevant_stmts, crab_invariants);
+        m_crab_path_solver->pathAnalyze(params, cex_blocks, LayeredCrabSolving,
+                                        cex_relevant_stmts, crab_invariants);
     // conversion from crab to Expr
-    extract_post_conditions_from_ai_cex(cex_blocks, crab_invariants,
-					path_constraints);
+    extractPostConditionsFromCrabCex(cex_blocks, crab_invariants,
+                                     path_constraints);
   } else {
-    res = m_crab_path_solver->path_analyze(
+    res = m_crab_path_solver->pathAnalyze(
         params, cex_blocks, LayeredCrabSolving, cex_relevant_stmts);
   }
 
   if (res) {
-    LOG("bmc-crab",
-	errs() << "Crab cannot prove unsat.\n"
-	       << "Post-conditions computed by crab:\n";
-	for (unsigned i=0,sz=cex_blocks.size();i<sz;++i) {
-	  auto it = path_constraints.find(cex_blocks[i]);
-	  if (it != path_constraints.end()) {
-	    errs() << cex_blocks[i]->getName() << ":\n";
-	    for (auto e: it->second) {
-	      errs() << "\t" << *e << "\n";	    
-	    }
-	  }
-	});
-  } else  {
-    LOG("bmc", get_os() << "Crab proved unsat.";
+    LOG(
+        "bmc-crab", errs() << "Crab cannot prove unsat.\n"
+                           << "Post-conditions computed by crab:\n";
+        for (unsigned i = 0, sz = cex_blocks.size(); i < sz; ++i) {
+          auto it = path_constraints.find(cex_blocks[i]);
+          if (it != path_constraints.end()) {
+            errs() << cex_blocks[i]->getName() << ":\n";
+            for (auto e : it->second) {
+              errs() << "\t" << *e << "\n";
+            }
+          }
+        });
+  } else {
+    LOG(
+        "bmc", get_os() << "Crab proved unsat.";
         // count the number of llvm instructions in the path
         unsigned num_stmts = 0;
         for (auto BB
@@ -692,37 +701,38 @@ bool PathBmcEngine::path_encoding_and_solve_with_ai(
         << " #Relevant statements " << cex_relevant_stmts.size() << "/"
         << num_stmts << ".\n";);
 
-    LOG("bmc-crab", errs() << "\nRelevant Crab statements:\n";
+    LOG(
+        "bmc-crab", errs() << "\nRelevant Crab statements:\n";
         for (auto &s
              : cex_relevant_stmts) {
-          errs() << s.m_parent.get_name();
-          if (s.m_parent.is_edge()) {
-            auto e = s.m_parent.get_edge();
+          errs() << s->get_parent()->label().get_name();
+          if (s->get_parent()->label().is_edge()) {
+            auto e = s->get_parent()->label().get_edge();
             errs() << " (" << e.first->getName() << "," << e.second->getName()
                    << ")";
           }
           errs() << ":\n";
-          crab::outs() << "\t" << *(s.m_s) << "\n";
+          crab::outs() << "\t" << *s << "\n";
         });
 
     // -- Extract the path condition from the spurious cex.
     std::set<Expr> path_cond;
-    assert(m_cfg_builder_man->has_cfg(*m_fn));
-    if (!gen_path_cond_from_ai_cex(cex, cex_relevant_stmts, path_cond)) {
+    assert(m_cfg_builder_man->hasCfg(*m_fn));
+    if (!genPathCondFromCrabCex(cex, cex_relevant_stmts, path_cond)) {
       // By returning true we pretend the query was sat so we run
       // the SMT solver next.
       return true;
     }
     m_path_cond.clear();
     m_path_cond.assign(path_cond.begin(), path_cond.end());
-    
-    #if 0
+
+#if 0
     //// DEBUGGING    
     Expr crab_bc = op::boolop::lneg(op::boolop::land(m_path_cond));
     llvm::errs() << "Blocking clause using crab: " << *crab_bc << "\n";
     m_path_cond.clear();
     return true;
-    #endif 
+#endif
   }
   return res;
 }
@@ -739,22 +749,23 @@ bool PathBmcEngine::path_encoding_and_solve_with_ai(
   NOTE: Currently, blocking clauses are Boolean since the only
   abstraction we handle is Boolean.
 */
-solver::SolverResult PathBmcEngine::path_encoding_and_solve_with_smt(
+solver::SolverResult PathBmcEngine::pathEncodingAndSolveWithSmt(
     const PathBmcTrace &cex, const expr_invariants_map_t & /*invariants*/,
     // extra constraints inferred by
     // crab for current implicant
     const expr_invariants_map_t & /*path_constraints*/) {
 
-  const ExprVector &path_formula = cex.get_implicant_formula();
-  const ExprMap &path_cond_map = cex.get_implicant_bools_map();
+  const ExprVector &path_formula = cex.getImplicantFormula();
+  const ExprMap &path_cond_map = cex.getImplicantBoolMap();
 
-  LOG("bmc-details", errs() << "PATH FORMULA:\n";
+  LOG(
+      "bmc-details", errs() << "PATH FORMULA:\n";
       for (Expr e
            : path_formula) { errs() << "\t" << *e << "\n"; });
 
   // For debugging
   // if (SmtOutDir != "") {
-  //   to_smt_lib(path_formula);
+  //   toSmtLib(path_formula);
   // }
 
   /*****************************************************************
@@ -772,13 +783,13 @@ solver::SolverResult PathBmcEngine::path_encoding_and_solve_with_smt(
 
   solver::SolverResult res;
   {
-    path_bmc::scoped_solver ss(*m_smt_path_solver, PathTimeout);
+    path_bmc::scopedSolver ss(*m_smt_path_solver, PathTimeout);
     res = ss.get().check();
   }
   if (res == solver::SolverResult::SAT) {
     m_model = m_smt_path_solver->get_model();
     if (SmtOutDir != "") {
-      to_smt_lib(path_formula, "sat");
+      toSmtLib(path_formula, "sat");
     }
   } else {
     // Stats::resume ("BMC path-based: SMT unsat core");
@@ -800,7 +811,7 @@ solver::SolverResult PathBmcEngine::path_encoding_and_solve_with_smt(
       m_unsolved_path_formulas.push(std::make_pair(m_num_paths, path_formula));
 
       if (SmtOutDir != "") {
-        to_smt_lib(path_formula, "unknown");
+        toSmtLib(path_formula, "unknown");
       }
     }
 
@@ -811,18 +822,18 @@ solver::SolverResult PathBmcEngine::path_encoding_and_solve_with_smt(
       break;
     }
     case path_bmc::MucMethodKind::MUC_DELETION: {
-      path_bmc::deletion_muc muc(*m_smt_path_solver, MucTimeout);
+      path_bmc::MucDeletion muc(*m_smt_path_solver, MucTimeout);
       muc.run(path_formula, unsat_core);
       break;
     }
     case path_bmc::MucMethodKind::MUC_BINARY_SEARCH: {
-      path_bmc::binary_search_muc muc(*m_smt_path_solver, MucTimeout);
+      path_bmc::MucBinarySearch muc(*m_smt_path_solver, MucTimeout);
       muc.run(path_formula, unsat_core);
       break;
     }
     case path_bmc::MucMethodKind::MUC_ASSUMPTIONS:
     default: {
-      path_bmc::muc_with_assumptions muc(*m_smt_path_solver);
+      path_bmc::MucWithAssumptions muc(*m_smt_path_solver);
       muc.run(path_formula, unsat_core);
       break;
     }
@@ -830,13 +841,12 @@ solver::SolverResult PathBmcEngine::path_encoding_and_solve_with_smt(
     // Stats::stop ("BMC path-based: SMT unsat core");
 
     LOG("bmc", get_os() << "Size of unsat core=" << unsat_core.size() << "\n";);
-    
-    LOG("bmc-details", 
-	errs() << "unsat core=\n";
-	for (auto e: unsat_core) {
-	  errs () << *e << "\n";
-	});
-    
+
+    LOG(
+        "bmc-details", errs() << "unsat core=\n";
+        for (auto e
+             : unsat_core) { errs() << *e << "\n"; });
+
     // Stats::resume ("BMC path-based: blocking clause");
     // -- Refine the Boolean abstraction using the unsat core
     ExprSet path_cond_set;
@@ -857,13 +867,12 @@ solver::SolverResult PathBmcEngine::path_encoding_and_solve_with_smt(
 }
 
 PathBmcEngine::PathBmcEngine(LegacyOperationalSemantics &sem,
-			     llvm::TargetLibraryInfoWrapperPass &tli,
-			     seadsa::ShadowMem &sm)
+                             llvm::TargetLibraryInfoWrapperPass &tli,
+                             seadsa::ShadowMem &sm)
     : m_sem(sem), m_cpg(nullptr), m_fn(nullptr), m_ls(nullptr),
       m_ctxState(sem.efac()), m_boolean_solver(nullptr),
-      m_smt_path_solver(nullptr), m_model(nullptr), m_num_paths(0),
-      m_tli(tli), m_sm(sm),
-      m_cfg_builder_man(nullptr), m_crab_path_solver(nullptr) {
+      m_smt_path_solver(nullptr), m_model(nullptr), m_num_paths(0), m_tli(tli),
+      m_sm(sm), m_cfg_builder_man(nullptr), m_crab_path_solver(nullptr) {
 
   if (SmtSolver == solver::SolverKind::Z3) {
     m_boolean_solver = std::make_unique<solver::z3_solver_impl>(sem.efac());
@@ -880,8 +889,7 @@ PathBmcEngine::PathBmcEngine(LegacyOperationalSemantics &sem,
   } else if (SmtSolver == solver::SolverKind::YICES2) {
 #ifdef WITH_YICES2
     m_boolean_solver = std::make_unique<solver::yices_solver_impl>(sem.efac());
-    m_smt_path_solver =
-        std::make_unique<solver::yices_solver_impl>(sem.efac());
+    m_smt_path_solver = std::make_unique<solver::yices_solver_impl>(sem.efac());
 #else
     assertion_failed("Compile with YICES2_HOME option", __FILE__, __LINE__);
 #endif
@@ -903,7 +911,7 @@ void PathBmcEngine::addCutPoint(const CutPoint &cp) {
 }
 
 // Print a path to a SMT-LIB file (for debugging purposes)
-void PathBmcEngine::to_smt_lib(const ExprVector &f, std::string prefix) {
+void PathBmcEngine::toSmtLib(const ExprVector &f, std::string prefix) {
   assert(SmtOutDir != "");
 
   std::error_code EC;
@@ -997,13 +1005,25 @@ void PathBmcEngine::encode() {
   Stats::stop("BMC path-based: precise encoding");
 }
 
-void PathBmcEngine::solve_bool_abstraction() {
+void PathBmcEngine::solveBoolAbstraction() {
   Stats::resume("BMC path-based: enumeration path solver");
   m_result = m_boolean_solver->check();
   Stats::stop("BMC path-based: enumeration path solver");
 }
 
 solver::SolverResult PathBmcEngine::solve() {
+  //*-------------------------------------------------------------------*//
+  // FIXME: the generation of blocking clauses is not sound when they
+  // are generated from Clam (genPathCondFromCrabCex). This is a
+  // big limitation since it's one of key feature of this BMC
+  // engine. It needs to be fixed.
+  //*-------------------------------------------------------------------*//
+  if (UseCrabForSolvingPaths) {
+    UseCrabForSolvingPaths = false;
+    WARN << "Disabling --horn-bmc-crab";
+  }
+  //*-------------------------------------------------------------------*//
+
   LOG("bmc", get_os(true) << "Starting path-based BMC \n";);
 
   // -- Precise encoding
@@ -1013,18 +1033,19 @@ solver::SolverResult PathBmcEngine::solve() {
 
   // -- Initialize AI and assert global invariants to refine the
   // -- precise encoding
-  initialize_ai();
+  initializeCrab();
   expr_invariants_map_t invariants /*currently unused*/;
-  add_global_invariants(invariants);
-  
-  LOG("bmc-details", for (Expr v
+  addGlobalCrabInvariants(invariants);
+
+  LOG(
+      "bmc-details", for (Expr v
                           : m_precise_side) { errs() << "\t" << *v << "\n"; });
 
   // -- Boolean abstraction
   LOG("bmc", get_os(true) << "Begin boolean abstraction\n";);
   Stats::resume("BMC path-based: initial boolean abstraction");
   ExprVector abs_side;
-  path_bmc::bool_abstraction(m_precise_side, abs_side);
+  path_bmc::boolAbstraction(m_precise_side, abs_side);
   // XXX: we use m_boolean_solver for keeping the abstraction.
   for (Expr v : abs_side) {
     LOG("bmc-details", errs() << "\t" << *v << "\n";);
@@ -1041,8 +1062,8 @@ solver::SolverResult PathBmcEngine::solve() {
    * path.
    **/
   while (true) {
-    solve_bool_abstraction();
-    
+    solveBoolAbstraction();
+
     // keep going while we can generate a path from the boolean
     // abstraction
     if (m_result != solver::SolverResult::SAT) {
@@ -1068,28 +1089,29 @@ solver::SolverResult PathBmcEngine::solve() {
       crab_invariants_map_t crab_path_constraints /*unused*/;
       bool keep_path_constraints = false;
       Stats::resume("BMC path-based: solving path + learning clauses with AI");
-      bool res = path_encoding_and_solve_with_ai(cex, keep_path_constraints,
-						 crab_path_constraints, path_constraints);
+      bool res = pathEncodingAndSolveWithCrab(
+          cex, keep_path_constraints, crab_path_constraints, path_constraints);
       Stats::stop("BMC path-based: solving path + learning clauses with AI");
 
-      LOG("bmc-ai", if (!path_constraints.empty()) {
-        errs() << "\nPath constraints (post-conditions) inferred by AI\n";
-        for (auto &kv : path_constraints) {
-          errs() << "\t" << kv.first->getName() << ": ";
-          if (kv.second.empty()) {
-            errs() << "true\n";
-          } else {
-            errs() << "{";
-            for (auto e : kv.second) {
-              errs() << *e << ";";
+      LOG(
+          "bmc-ai", if (!path_constraints.empty()) {
+            errs() << "\nPath constraints (post-conditions) inferred by AI\n";
+            for (auto &kv : path_constraints) {
+              errs() << "\t" << kv.first->getName() << ": ";
+              if (kv.second.empty()) {
+                errs() << "true\n";
+              } else {
+                errs() << "{";
+                for (auto e : kv.second) {
+                  errs() << *e << ";";
+                }
+                errs() << "}\n";
+              }
             }
-            errs() << "}\n";
-          }
-        }
-      });
+          });
 
       if (!res) {
-        bool ok = block_path();
+        bool ok = blockPath();
         if (ok) {
           Stats::count("BMC number symbolic paths discharged by AI");
           continue;
@@ -1105,7 +1127,7 @@ solver::SolverResult PathBmcEngine::solve() {
     // XXX: the semantics of invariants and path_constraints (e.g.,
     // linear integer arithmetic) might differ from the semantics used
     // by the smt (e.g., bitvectors).
-    solver::SolverResult res = path_encoding_and_solve_with_smt(
+    solver::SolverResult res = pathEncodingAndSolveWithSmt(
         cex, invariants, path_constraints /*unused*/);
     Stats::stop("BMC path-based: solving path + learning clauses with SMT");
     if (res == solver::SolverResult::SAT) {
@@ -1118,7 +1140,7 @@ solver::SolverResult PathBmcEngine::solve() {
     } else {
       // if res is unknown we still add a blocking clause to skip
       // the path.
-      bool ok = block_path();
+      bool ok = blockPath();
       if (!ok) {
         ERR << "Path-based BMC added the same blocking clause again";
         m_result = solver::SolverResult::UNKNOWN;
@@ -1159,13 +1181,13 @@ solver::SolverResult PathBmcEngine::solve() {
 
       solver::SolverResult res;
       {
-        path_bmc::scoped_solver ss(*m_smt_path_solver, timeout);
+        path_bmc::scopedSolver ss(*m_smt_path_solver, timeout);
         res = ss.get().check();
       }
       if (res == solver::SolverResult::SAT) {
         m_model = m_smt_path_solver->get_model();
         if (SmtOutDir != "") {
-          to_smt_lib(kv.second, "sat");
+          toSmtLib(kv.second, "sat");
         }
         LOG("bmc", get_os(true) << "Path " << kv.first << " proved sat!\n";);
         m_result = solver::SolverResult::SAT;
@@ -1197,7 +1219,7 @@ solver::SolverResult PathBmcEngine::solve() {
   return m_result;
 }
 
-bool PathBmcEngine::block_path() {
+bool PathBmcEngine::blockPath() {
   Stats::resume("BMC path-based: adding blocking clauses");
 
   // -- Refine the Boolean abstraction

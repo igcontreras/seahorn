@@ -199,8 +199,11 @@ public:
   /// \brief Perform symbolic memset
   Expr MemSet(Expr ptr, Expr val, unsigned len, uint32_t align);
 
-  /// \brief Perform symbolic memcpy
+  /// \brief Perform symbolic memcpy with constant length
   Expr MemCpy(Expr dPtr, Expr sPtr, unsigned len, uint32_t align);
+
+  /// \brief Perform symbolic memcpy with symbolic length
+  Expr MemCpy(Expr dPtr, Expr sPtr, Expr len, uint32_t align);
 
   /// \brief Copy concrete memory into symbolic memory
   Expr MemFill(Expr dPtr, char *sPtr, unsigned len, uint32_t align = 0);
@@ -386,14 +389,17 @@ protected:
   /// \brief All known global allocations
   std::vector<GlobalAllocInfo> m_globals;
 
+  /// \brief Maximal assumed size of symbolic allocation
+  unsigned m_maxSymbAllocSz;
+
   // TODO: turn into user-controlled parameters
-  unsigned MAX_STACK_ADDR = 0xC0000000;
-  unsigned MIN_STACK_ADDR = (MAX_STACK_ADDR - 9437184);
-  unsigned TEXT_SEGMENT_START = 0x08048000;
+  const unsigned MAX_STACK_ADDR = 0xC0000000;
+  const unsigned MIN_STACK_ADDR = (MAX_STACK_ADDR - 9437184);
+  const unsigned TEXT_SEGMENT_START = 0x08048000;
 
 public:
   using AddrInterval = std::pair<unsigned, unsigned>;
-  OpSemAllocator(OpSemMemManager &mem);
+  OpSemAllocator(OpSemMemManager &mem, unsigned maxSymbAllocSz = 4096);
 
   virtual ~OpSemAllocator();
 
@@ -458,8 +464,10 @@ public:
 };
 
 /// \brief Creates an instance of OpSemAllocator
-std::unique_ptr<OpSemAllocator> mkNormalOpSemAllocator(OpSemMemManager &mem);
-std::unique_ptr<OpSemAllocator> mkStaticOpSemAllocator(OpSemMemManager &mem);
+std::unique_ptr<OpSemAllocator> mkNormalOpSemAllocator(OpSemMemManager &mem,
+                                                       unsigned maxSymbAllocSz = 4096);
+std::unique_ptr<OpSemAllocator> mkStaticOpSemAllocator(OpSemMemManager &mem,
+                                                       unsigned maxSymbAllocSz = 4096);
 
 class OpSemMemManagerBase {
 protected:
@@ -637,7 +645,13 @@ public:
 
   /// \brief Executes symbolic memcpy with concrete length
   virtual MemValTy MemCpy(PtrTy dPtr, PtrTy sPtr, unsigned len,
-                          MemValTy memTrsfrRead, uint32_t align) = 0;
+                          MemValTy memTrsfrRead, MemValTy memRead,
+                          uint32_t align) = 0;
+
+  /// \brief Executes symbolic memcpy with symbolic length
+  virtual MemValTy MemCpy(PtrTy dPtr, PtrTy sPtr, Expr len,
+                          MemValTy memTrsfrRead, MemValTy memRead,
+                          uint32_t align) = 0;
 
   /// \brief Executes symbolic memcpy from physical memory with concrete length
   virtual MemValTy MemFill(PtrTy dPtr, char *sPtr, unsigned len, MemValTy mem,
@@ -740,7 +754,12 @@ public:
   virtual Expr MemSet(Expr ptr, Expr _val, unsigned len, Expr mem,
                       unsigned wordSzInBytes, Expr ptrSort, uint32_t align) = 0;
   virtual Expr MemCpy(Expr dPtr, Expr sPtr, unsigned len, Expr memTrsfrRead,
-                      unsigned wordSzInBytes, Expr ptrSort, uint32_t align) = 0;
+                      Expr memRead, unsigned wordSzInBytes, Expr ptrSort,
+                      uint32_t align) = 0;
+  virtual Expr MemCpy(Expr dPtr, Expr sPtr, Expr len, Expr memTrsfrRead,
+                      Expr memRead, unsigned wordSzInBytes, Expr ptrSort,
+                      uint32_t align) = 0;
+
   virtual Expr MemFill(Expr dPtr, char *sPtr, unsigned len, Expr mem,
                        unsigned wordSzInBytes, Expr ptrSort,
                        uint32_t align) = 0;
@@ -750,8 +769,9 @@ public:
 /// \brief Represent memory regions by logical arrays
 class OpSemMemArrayRepr : public OpSemMemRepr {
 public:
-  OpSemMemArrayRepr(OpSemMemManager &memManager, Bv2OpSemContext &ctx)
-      : OpSemMemRepr(memManager, ctx) {}
+  OpSemMemArrayRepr(OpSemMemManager &memManager, Bv2OpSemContext &ctx,
+                    unsigned memCpyUnrollCnt)
+      : OpSemMemRepr(memManager, ctx), m_memCpyUnrollCnt(memCpyUnrollCnt) {}
 
   Expr coerce(Expr _, Expr val) override { return val; }
 
@@ -768,12 +788,20 @@ public:
   Expr MemSet(Expr ptr, Expr _val, unsigned len, Expr mem,
               unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
   Expr MemCpy(Expr dPtr, Expr sPtr, unsigned len, Expr memTrsfrRead,
+              Expr memRead, unsigned wordSzInBytes, Expr ptrSort,
+              uint32_t align) override;
+
+  Expr MemCpy(Expr dPtr, Expr sPtr, Expr len, Expr memTrsfrRead, Expr memRead,
               unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
+
   Expr MemFill(Expr dPtr, char *sPtr, unsigned len, Expr mem,
                unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
   Expr FilledMemory(Expr ptrSort, Expr val) override {
     return op::array::constArray(ptrSort, val);
   }
+
+private:
+  unsigned m_memCpyUnrollCnt;
 };
 
 /// \brief Represent memory regions by lambda functions
@@ -795,6 +823,9 @@ public:
   Expr MemSet(Expr ptr, Expr _val, unsigned len, Expr mem,
               unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
   Expr MemCpy(Expr dPtr, Expr sPtr, unsigned len, Expr memTrsfrRead,
+              Expr memRead, unsigned wordSzInBytes, Expr ptrSort,
+              uint32_t align) override;
+  Expr MemCpy(Expr dPtr, Expr sPtr, Expr len, Expr memTrsfrRead, Expr memRead,
               unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
   Expr MemFill(Expr dPtr, char *sPtr, unsigned len, Expr mem,
                unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
@@ -804,6 +835,11 @@ private:
   Expr coerceArrayToLambda(Expr arrVal);
   Expr makeLinearITE(Expr addr, const ExprVector &ptrKeys,
                      const ExprVector &vals, Expr fallback);
+  // address of the last word that is copied into dst
+  Expr createMemCpyExpr(const Expr &dPtr, const Expr &sPtr, const Expr &memRead,
+                        const Expr &ptrSort, const Expr &srcMem,
+                        const Expr &dstLast, unsigned wordSzInBytes,
+                        uint32_t align) const;
 };
 
 /// Evaluates constant expressions

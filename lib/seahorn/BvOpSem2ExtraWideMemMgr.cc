@@ -193,7 +193,6 @@ public:
     // -- compute number of bytes needed
     Expr bytes = elmts;
     if (typeSz > 1) {
-      // TODO: factor out multiplication and number creation
       bytes = m_ctx.alu().doMul(bytes, m_ctx.alu().si(typeSz, ptrSzInBits()),
                                 ptrSzInBits());
     }
@@ -212,7 +211,7 @@ public:
     // -- have a good region, return pointer to it
     return PtrTy(mkStackPtr(region.second).getBase(),
                  m_ctx.alu().si(0UL, ptrSzInBits()),
-                 m_ctx.alu().si(region.first - region.second, g_slotBitWidth));
+                 bytes);
   }
 
   PtrTy mkStackPtr(unsigned int offset) {
@@ -498,13 +497,25 @@ public:
   }
 
   MemValTy MemCpy(PtrTy dPtr, PtrTy sPtr, unsigned int len,
-                  MemValTy memTrsfrRead, uint32_t align) {
-    return MemValTy(m_main.MemCpy(getAddressable(dPtr), getAddressable(sPtr),
-                                  len, memTrsfrRead.getRaw(), align),
-                    m_offset.MemCpy(getAddressable(dPtr), getAddressable(sPtr),
-                                    len, memTrsfrRead.getOffset(), align),
-                    m_size.MemCpy(getAddressable(dPtr), getAddressable(sPtr),
-                                  len, memTrsfrRead.getSize(), align));
+                  MemValTy memTrsfrRead, MemValTy memRead, uint32_t align) {
+    return MemValTy(
+        m_main.MemCpy(getAddressable(dPtr), getAddressable(sPtr), len,
+                      memTrsfrRead.getRaw(), memRead.getRaw(), align),
+        m_offset.MemCpy(getAddressable(dPtr), getAddressable(sPtr), len,
+                        memTrsfrRead.getOffset(), memRead.getOffset(), align),
+        m_size.MemCpy(getAddressable(dPtr), getAddressable(sPtr), len,
+                      memTrsfrRead.getSize(), memRead.getSize(), align));
+  }
+
+  MemValTy MemCpy(PtrTy dPtr, PtrTy sPtr, Expr len, MemValTy memTrsfrRead,
+                  MemValTy memRead, uint32_t align) {
+    return MemValTy(
+        m_main.MemCpy(getAddressable(dPtr), getAddressable(sPtr), len,
+                      memTrsfrRead.getRaw(), memRead.getRaw(), align),
+        m_offset.MemCpy(getAddressable(dPtr), getAddressable(sPtr), len,
+                        memTrsfrRead.getOffset(), memRead.getOffset(), align),
+        m_size.MemCpy(getAddressable(dPtr), getAddressable(sPtr), len,
+                      memTrsfrRead.getSize(), memRead.getSize(), align));
   }
 
   MemValTy MemFill(PtrTy dPtr, char *sPtr, unsigned int len, MemValTy mem,

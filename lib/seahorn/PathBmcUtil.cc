@@ -9,7 +9,7 @@
 namespace seahorn {
 namespace path_bmc {
 
-scoped_solver::scoped_solver(solver::Solver &solver, unsigned timeout /*sec*/)
+scopedSolver::scopedSolver(solver::Solver &solver, unsigned timeout /*sec*/)
     : m_solver(solver) {
   if (m_solver.get_kind() == solver::SolverKind::Z3) {
     solver::z3_solver_impl &z3 =
@@ -26,7 +26,7 @@ scoped_solver::scoped_solver(solver::Solver &solver, unsigned timeout /*sec*/)
   }
 }
 
-scoped_solver::~scoped_solver() {
+scopedSolver::~scopedSolver() {
   if (m_solver.get_kind() == solver::SolverKind::Z3) {
     solver::z3_solver_impl &z3 =
         static_cast<solver::z3_solver_impl &>(m_solver);
@@ -36,11 +36,9 @@ scoped_solver::~scoped_solver() {
   }
 }
 
-
 namespace expr_utils {
 bool isEdge(Expr e) {
-  return expr::op::bind::isFdecl(e->left()) &&
-    isOpX<TUPLE>(e->left()->left());
+  return expr::op::bind::isFdecl(e->left()) && isOpX<TUPLE>(e->left()->left());
 }
 
 std::pair<Expr, Expr> getEdge(Expr e) {
@@ -52,7 +50,7 @@ std::pair<Expr, Expr> getEdge(Expr e) {
 }
 
 expr::Expr mkEdge(expr::Expr e1, expr::Expr e2) {
-  return bind::boolConst(mk<TUPLE>(e1, e2)); 
+  return bind::boolConst(mk<TUPLE>(e1, e2));
 }
 
 // /*

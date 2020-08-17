@@ -15,7 +15,7 @@ namespace seahorn {
 
 using namespace llvm;
 
-void PathBmcTrace::get_model_implicant(const ExprVector &f) {
+void PathBmcTrace::getModelImplicant(const ExprVector &f) {
   // XXX This is a partial implementation. Specialized to the
   // constraints expected to occur in m_side.
   Expr bool_lit = nullptr;
@@ -66,7 +66,7 @@ PathBmcTrace::PathBmcTrace(PathBmcEngine &bmc, solver::Solver::model_ref model)
 
   m_trace.reserve(encoding.size());
   ExprMap bool_map /*unused*/;
-  get_model_implicant(encoding);
+  getModelImplicant(encoding);
   boost::container::flat_set<Expr> implicant(m_trace.begin(), m_trace.end());
 
   // construct the trace from the implicant
@@ -155,7 +155,8 @@ Expr PathBmcTrace::eval(unsigned loc, Expr u, bool complete) {
     // HACK: s.eval does not traverse function declarations
     auto t = path_bmc::expr_utils::getEdge(u);
     if (store.isDefined(t.first) && store.isDefined(t.second)) {
-      v = path_bmc::expr_utils::mkEdge(store.eval(t.first), store.eval(t.second));
+      v = path_bmc::expr_utils::mkEdge(store.eval(t.first),
+                                       store.eval(t.second));
     }
   } else {
     v = store.eval(u);

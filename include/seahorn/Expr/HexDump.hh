@@ -10,7 +10,7 @@ namespace hexDump {
  * This is an individual cell in the hex dump. It stores a key and its
  * corresponding value
  *
- * \note bvnums are stored as MPZ expressions
+ * \note bvnums and UINT are stored as MPZ expressions
  */
 class KeyValue {
   std::pair<Expr, Expr> m_pair; // <key, value>
@@ -64,17 +64,29 @@ using const_hd_range = llvm::iterator_range<const_hd_iterator>;
  *    else: the value if the condition is a NEQ expression. Can be a nested ITE
  *    if the condition is an EQ expression
  *
- *
  * If the given expression is not one of the supported expressions (ITE, STORE,
  * SET) above, it will search its children for the first supported expression
  * and use that.
+ *
+ * Widths:
+ *    bvnums: uses the width of the bvnum
+ *
+ *    UINT/MPZ : uses the max width of all the numbers
+ *
+ * Alignment:
+ *    bvnums: assumes the addresses are aligned based on the width of the value
+ *      unless it finds an index/key that is misaligned (not divisible by the
+ *      width (in bytes))
+ *
+ *    uint/mpz: assumes its not aligned
+
  */
 class HexDump {
   class Impl;
   Impl *m_impl;
 
 public:
-  HexDump(Expr exp, unsigned addressesPerWord = 1);
+  HexDump(Expr exp);
   ~HexDump();
 
   const_hd_iterator cbegin() const;
@@ -98,7 +110,7 @@ class StructHexDump {
   StructImpl *m_impl;
 
 public:
-  StructHexDump(Expr exp, unsigned addressesPerWord = 1);
+  StructHexDump(Expr exp);
   ~StructHexDump();
 
   std::vector<const_hd_range> getRanges() const;

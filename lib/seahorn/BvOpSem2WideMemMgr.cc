@@ -455,11 +455,21 @@ public:
   }
 
   MemValTy MemCpy(PtrTy dPtr, PtrTy sPtr, unsigned int len,
-                  MemValTy memTrsfrRead, uint32_t align) {
-    return MemValTy(m_main.MemCpy(dPtr.getRaw(), sPtr.getRaw(), len,
-                                  memTrsfrRead.getRaw(), align),
-                    m_size.MemCpy(dPtr.getRaw(), sPtr.getRaw(), len,
-                                  memTrsfrRead.getSize(), align));
+                  MemValTy memTrsfrRead, MemValTy memRead, uint32_t align) {
+    return MemValTy(
+        m_main.MemCpy(dPtr.getRaw(), sPtr.getRaw(), len, memTrsfrRead.getRaw(),
+                      memRead.getRaw(), align),
+        m_size.MemCpy(dPtr.getRaw(), sPtr.getRaw(), len, memTrsfrRead.getSize(),
+                      memRead.getSize(), align));
+  }
+
+  MemValTy MemCpy(PtrTy dPtr, PtrTy sPtr, Expr len, MemValTy memTrsfrRead,
+                  MemValTy memRead, uint32_t align) {
+    return MemValTy(
+        m_main.MemCpy(dPtr.getRaw(), sPtr.getRaw(), len, memTrsfrRead.getRaw(),
+                      memRead.getRaw(), align),
+        m_size.MemCpy(dPtr.getRaw(), sPtr.getRaw(), len, memTrsfrRead.getSize(),
+                      memRead.getSize(), align));
   }
 
   MemValTy MemFill(PtrTy dPtr, char *sPtr, unsigned int len, MemValTy mem,
