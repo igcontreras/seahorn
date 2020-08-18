@@ -19,7 +19,7 @@ bool isSafeNode(NodeSet &unsafe, const Node *n) { return unsafe.count(n) == 0; }
 
 // -- true if 2 nodes encode a memory object of unbounded size
 static bool isUnboundedMem(const Node *nSumm, const Node *nTD) {
-  return nSumm->isArray() || nTD->isOffsetCollapsed();
+  return nSumm->isArray() || nSumm->isOffsetCollapsed();
 }
 
 struct ExplorationInfo {
@@ -48,9 +48,9 @@ static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
 
     bool explored = ((ei.m_explColor.count(nextN) > 0) &&
                      ei.m_explColor[nextN] == EColor::BLACK);
-    bool marked_safe = isSafeNode(ei.m_calleeUnsafe, nextN);
+    bool marked_unsafe = !isSafeNode(ei.m_calleeUnsafe, nextN);
 
-    if (!(explored && !marked_safe)) {
+    if (!(explored && marked_unsafe)) {
       const Node &nNextCaller = *ei.m_sm.get(nextC).getNode();
       propagateUnsafeChildren(*nextN, nNextCaller, ei);
     }
@@ -85,10 +85,12 @@ static bool exploreNode(const Node &nCallee, const Node &nCaller,
 }
 
 static void computeUnsafeNodesSimulation(Graph &fromG, const Function &F,
-                                         NodeSet &fromUnsafe,
-                                         NodeSet &callerUnsafe,
+                                         NodeSet &fromSafe,
+                                         NodeSet &toSafe,
                                          SimulationMapper &sm) {
-  ExplorationInfo ei(fromUnsafe, callerUnsafe, sm);
+  NodeSet fromUnsafe, toUnsafe;
+
+  ExplorationInfo ei(fromUnsafe, toUnsafe, sm);
 
   for (const Argument &a : F.args()) {
     if (fromG.hasCell(a)) { // scalar arguments don't have cells
@@ -100,8 +102,7 @@ static void computeUnsafeNodesSimulation(Graph &fromG, const Function &F,
   }
 
   // globals
-  for (auto &kv :
-       boost::make_iterator_range(fromG.globals_begin(), fromG.globals_end())) {
+  for (auto &kv : fromG.globals()) {
     Cell &c = *kv.second;
     exploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
   }
@@ -110,6 +111,15 @@ static void computeUnsafeNodesSimulation(Graph &fromG, const Function &F,
   if (fromG.hasRetCell(F)) {
     Cell &c = fromG.getRetCell(F);
     exploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
+  }
+
+  // ei.m_explColor has the nodes explored
+  for( auto kv : ei.m_explColor){
+    const Node * n = kv.first;
+    if(fromUnsafe.count(n) == 0){
+      fromSafe.insert(n);
+      toSafe.insert(sm.get(*n).getNode());
+    }
   }
 }
 } // namespace
@@ -145,21 +155,23 @@ bool InterMemPreProc::runOnModule(Module &M) {
         NodeSet f_node_safe;
 
         const Graph &callerG = ga.getGraph(*f_caller);
-        const Graph &fromG = ga.getSummaryGraph(*f_callee);
+        const Graph &calleeG = ga.getSummaryGraph(*f_callee);
 
         const Instruction *I = dsaCS.getInstruction();
 
         // creating the SimulationMapper object
         SimulationMapper &simMap = m_smCS[I];
 
-        Graph::computeCalleeCallerMapping(dsaCS, *(const_cast<Graph *>(&fromG)),
-                                          *(const_cast<Graph *>(&callerG)),
-                                          simMap);
+        Graph::computeCalleeCallerMapping(
+            dsaCS, *(const_cast<Graph *>(&calleeG)),
+            *(const_cast<Graph *>(&callerG)), simMap);
 
         NodeSet &unsafeCallee = getUnsafeNodesCalleeCS(I); // creates it
         NodeSet &unsafeCaller = getUnsafeNodesCallerCS(I); // creates it
-        computeUnsafeNodesSimulation(*(const_cast<Graph *>(&fromG)), *f_callee,
-                                     unsafeCallee, unsafeCaller, simMap);
+        computeUnsafeNodesSimulation(*(const_cast<Graph *>(&calleeG)),
+                                     *f_callee, unsafeCallee, unsafeCaller,
+                                     simMap);
+
       }
     }
   }
@@ -174,19 +186,17 @@ bool InterMemPreProc::runOnModule(Module &M) {
 }
 
 NodeSet &InterMemPreProc::getUnsafeNodesCallerCS(const Instruction *I) {
-  const CallInst *CI = dyn_cast<const CallInst>(I);
-  assert(CI);
+  assert(dyn_cast<const CallInst>(I));
   return m_unsafen_cs_caller[I];
 }
 
 NodeSet &InterMemPreProc::getUnsafeNodesCalleeCS(const Instruction *I) {
-  const CallInst *CI = dyn_cast<const CallInst>(I);
-  assert(CI);
+  assert(dyn_cast<const CallInst>(I));
   return m_unsafen_cs_callee[I];
 }
 
 bool InterMemPreProc::isSafeNode(NodeSet &unsafe, const Node *n) {
-  return ::isSafeNode(unsafe, n);
+  return !::isSafeNode(unsafe, n);
 }
 
 bool InterMemPreProc::isSafeNodeFunc(const Node &n, const Function *f) {
