@@ -1,5 +1,6 @@
-// RUN: sea smt -O0 --dsa=sea-cs --horn-shadow-mem-optimize=false
-// --horn-inter-proc-fmaps %s CHECK: ^unknown$ XFAIL: *
+// RUN: sea smt -O0 --dsa=sea-cs --horn-shadow-mem-optimize=false --horn-inter-proc-fmaps %s
+
+// CHECK: ^unknown$ XFAIL: *
 
 #include <stdlib.h>
 

@@ -87,7 +87,7 @@ public:
 
   virtual void execCallSite(CallSiteInfo &csi, ExprVector &side, SymStore &s);
   virtual void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
-                                 SymStore &s){}; // do nothing
+                           SymStore &s){}; // do nothing
 };
 
 enum class MemOpt { IN, OUT };
@@ -144,7 +144,7 @@ protected:
 
   // Internal methods to handle array expressions and cells.
   void addCIArraySymbol(CallInst *CI, Expr A, MemOpt ao);
-  void addArraySymbol(const seadsa::Cell &c, Expr A, MemOpt ao);
+  virtual void addArraySymbol(const seadsa::Cell &c, Expr A, MemOpt ao);
   Expr getOrigMemSymbol(const seadsa::Cell &c, MemOpt ao);
   bool hasOrigArraySymbol(const seadsa::Cell &c, MemOpt ao);
   // creates a new array symbol for array origE if it was not created already
@@ -197,8 +197,12 @@ class FMapUfoOpSem : public MemUfoOpSem {
 
   // -- Additional store operations for the out memories (copy back)
   ExprMap m_fmOut;
-  // -- Additional store operations for the out memories (copy back)
+  // -- Additional store operations for the parameters to be replaced
   ExprMap m_replace;
+
+  // -- store the cell that corresponds to an expression
+  using ExprCellMap = std::map<Expr, std::pair<const seadsa::Node *, unsigned>>;
+  ExprCellMap m_exprCell;
 
   // -- constant base for keys
   Expr m_keyBase;
@@ -218,10 +222,12 @@ public:
   Expr symb(const Value &v) override;
   void execCallSite(CallSiteInfo &CS, ExprVector &side, SymStore &s) override;
 
-  void execMemInit(CallSite &CS, Expr mem, ExprVector &side, SymStore &s) override;
+  void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
+                   SymStore &s) override;
 
 protected:
   void processShadowMemsCallSite(CallSiteInfo &csi) override;
+  void addArraySymbol(const seadsa::Cell &c, Expr A, MemOpt ao) override;
 
 private:
   void VCgenArg(const Cell &cArgCallee, Expr basePtr,

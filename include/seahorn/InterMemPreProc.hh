@@ -24,6 +24,7 @@ private:
 
   using SimMapperFMap =
       llvm::DenseMap<const llvm::Function *, seadsa::SimulationMapper>;
+  // simulation of BU graph vs SAS graph of the same Function
   SimMapperFMap m_smF;
 
   using NodesCSMap = llvm::DenseMap<const llvm::Instruction *, NodeSet>;
@@ -57,7 +58,7 @@ public:
   bool isSafeNode(NodeSet &unsafe, const seadsa::Node *n);
   bool isSafeNodeFunc(const Node &n, const Function *f);
 
-  void preprocFunction(const Function *f);
+  void runOnFunction(const Function *f);
 
   bool hasSimulationF(const Function *f) { m_smF.count(f) > 0; }
   seadsa::SimulationMapper &getSimulationF(const Function *f) {

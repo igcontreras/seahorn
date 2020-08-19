@@ -1397,8 +1397,7 @@ void MemUfoOpSem::addCIArraySymbol(CallInst *CI, Expr A, MemOpt ao) {
 void MemUfoOpSem::addArraySymbol(const Cell &c, Expr A, MemOpt ao) {
   NodeIdMap &map = getOrigMap(ao);
 
-  LOG("inter_mem", errs() << "<-- addArraySymbol "; A->dump();
-      errs() << "\n"
+  LOG("inter_mem", errs() << "<-- addArraySymbol " << *A << "\n"
              << " " << c.getNode() << " " << getOffset(c) << "\n";);
   map.insert({{c.getNode(), getOffset(c)}, A});
 }
@@ -1552,7 +1551,7 @@ void MemUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
     Function *f_callee = ci->getCalledFunction();
     if(f_callee == nullptr)
       break;
-    
+
     if (f_callee->getName().equals("shadow.mem.arg.ref"))
       addCIArraySymbol(ci, csi.m_fparams[i], MemOpt::IN);
     else if (f_callee->getName().equals("shadow.mem.arg.mod")) {
@@ -1643,8 +1642,7 @@ Expr FMapUfoOpSem::symb(const Value &V) {
                   variant::variant(i, variant::tag(v, m_keyBase))));
 
             Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
-            LOG("fmap_symb", errs()
-                                 << *v << ": "
+            LOG("fmap_symb", errs() << *v << ": "
                                  << *sort::finiteMapTy(intTy, keys) << "\n";);
 
             return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
@@ -1690,10 +1688,10 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
   for (const Argument *arg : fi.args) {
     Expr argE = s.read(symb(*CS.getArgument(arg->getArgNo())));
+    csi.m_fparams.push_back(argE);
     if (calleeG.hasCell(*arg)) // checking that the argument is a pointer
       VCgenArg(calleeG.getCell(*arg), argE, unsafeNodesCaller, simMap,
                *calleeF);
-    csi.m_fparams.push_back(argE);
   }
 
   for (const GlobalVariable *gv : fi.globals) {
@@ -1716,7 +1714,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
   for (int i = 3; i < csi.m_fparams.size(); i++) {
     Expr param = csi.m_fparams[i];
-    if (hasExprKeys(param)) {
+    if (hasExprKeys(param)) { // parameter that is copied
       assert(m_fmValues.count(param) > 0);
 
       Expr fmap = m_replace[param];
@@ -1728,6 +1726,28 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
       LOG("fmap_opsem", errs() << "\t" << *param << " : replaced by \n "
                                << "\t    " << *fmap << "\n";);
+    } else if (isOpX<ARRAY_TY>(fi.sumPred->arg(i)) &&
+               bind::isFiniteMapConst(param)) {
+      // -- the memory region does not exist in the bu graph of the callee but is
+      // still passed (as an array)
+
+      assert(m_exprCell.count(param) > 0); // initialized when processing the
+                                           // shadow.mem annotations
+      const Node * n = m_exprCell[param].first;
+      if (n->isRead()){
+        // -- create a fresh array (not reachable in the callee bu)
+        csi.m_fparams[i] = bind::mkConst(variant::variant(0, param), fi.sumPred->arg(i));
+        if (n->isModified()){
+          // -- add memOut = memIn
+          side.push_back(mk<EQ>(param, csi.m_fparams[i + 1]));
+          csi.m_fparams[i + 1] = bind::mkConst(
+              variant::variant(0, csi.m_fparams[i + 1]), fi.sumPred->arg(i + 1));
+          i++; // skip the next parameter (out memory region)
+        }
+      }
+      else
+        assert(false && "only out mem region not reachable in bu graph");
+
     }
   }
 
@@ -1751,6 +1771,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   m_fmKeys.clear();
   m_fmValues.clear();
   m_fmOut.clear();
+  m_exprCell.clear();
 }
 
 Expr FMapUfoOpSem::fmVariant(Expr e, const ExprVector &keys) {
@@ -1967,6 +1988,12 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side,
 
   side.push_back(
       mk<EQ>(initMem, finite_map::constFiniteMap(keys, m_fmapDefault)));
+}
+
+void FMapUfoOpSem::addArraySymbol(const Cell &c, Expr A, MemOpt ao) {
+
+  m_exprCell[A] = {c.getNode(), c.getOffset()};
+  MemUfoOpSem::addArraySymbol(c, A, ao);
 }
 
 } // namespace seahorn

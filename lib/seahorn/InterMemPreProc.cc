@@ -180,7 +180,7 @@ bool InterMemPreProc::runOnModule(Module &M) {
   // user?
   for (const Function &f : M)
     if (ga.hasSummaryGraph(f))
-      preprocFunction(&f);
+      runOnFunction(&f);
 
   return false;
 }
@@ -204,7 +204,7 @@ bool InterMemPreProc::isSafeNodeFunc(const Node &n, const Function *f) {
   return m_unsafeNF[f].count(&n) == 0;
 }
 
-void InterMemPreProc::preprocFunction(const Function *F) {
+void InterMemPreProc::runOnFunction(const Function *F) {
 
   GlobalAnalysis &ga = m_shadowDsa.getDsaAnalysis();
 
@@ -236,8 +236,7 @@ void InterMemPreProc::preprocFunction(const Function *F) {
       recProcessNode(buG.getCell(a), unsafeSAS, simMap, explored, rm);
     }
 
-  for (auto &kv :
-       boost::make_iterator_range(buG.globals_begin(), buG.globals_end())) {
+  for (auto &kv : buG.globals()) {
     Cell &c = *kv.second;
     explored.clear();
     recProcessNode(c, unsafeSAS, simMap, explored, rm);
@@ -258,6 +257,7 @@ unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
   return getNumAccesses(nCI.getNode(), f);
 }
 
+// -- processes the nodes in a graph to obtain the number accesses to different offsets
 void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
                                      SimulationMapper &simMap,
                                      NodeSet &explored, RegionsMap &rm) {
