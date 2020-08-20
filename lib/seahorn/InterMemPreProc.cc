@@ -36,9 +36,9 @@ static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
                                     ExplorationInfo &ei) {
 
   if (isSafeNode(ei.m_calleeUnsafe, &n))
-    ei.m_calleeUnsafe.insert(&n); // we store the ones that are not safe
+    ei.m_calleeUnsafe.insert(&n); // store the ones that are not safe
   if (isSafeNode(ei.m_callerUnsafe, &nCaller))
-    ei.m_callerUnsafe.insert(&nCaller); // we store the ones that are not safe
+    ei.m_callerUnsafe.insert(&nCaller);
 
   ei.m_explColor[&n] = EColor::BLACK;
 
@@ -57,6 +57,7 @@ static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
   }
 }
 
+// -- returns true if the nodes are unsafe
 static bool exploreNode(const Node &nCallee, const Node &nCaller,
                         ExplorationInfo &ei) {
   ei.m_explColor[&nCallee] = EColor::GRAY;
