@@ -160,6 +160,9 @@ protected:
   // expressions that correspond to each of the cells involved.
   virtual void processShadowMemsCallSite(CallSiteInfo &csi);
 
+  // \brief true if `c` is encoded with a scalar variable
+  bool isMemScalar(const Cell &c);
+
 private:
   NodeIdMap &getOrigMap(MemOpt ao) {
     return ao == MemOpt::IN ? m_orig_array_in : m_orig_array_out;
@@ -241,7 +244,7 @@ private:
   Expr fmVariant(Expr e, const ExprVector &keys);
   void addKeyVal(Cell c, Expr basePtr, Expr offset, MemOpt ao);
   void storeVal(Cell c, Expr readFrom, Expr basePtr, Expr offset);
-
+  
   // creates an ExprVector if not initialized already
   ExprVector &getExprKeys(Expr e) { return m_fmKeys[e]; }
   bool hasExprKeys(Expr e) { return m_fmKeys.count(e) > 0; }

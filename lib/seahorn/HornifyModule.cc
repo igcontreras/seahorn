@@ -454,9 +454,6 @@ bool HornifyModule::runOnFunction(Function &F) {
 
   LOG("inter_mem_counters", tmp_im_stats.copyTo(g_im_stats));
 
-  /// -- hornify function
-  LOG("inter_mem_fmaps", errs() << "\n---------- HornifyFunction "
-                                << F.getGlobalIdentifier() << "\n";);
   hf->runOnFunction(F);
 
   return false;
