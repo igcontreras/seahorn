@@ -157,6 +157,7 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
       return !isOpX<FINITE_MAP_TY>(bind::rangeTy(bind::fname(expr)));
     });
 
+    errs() << "new rule\n";
     HornRule newRule(newVars, rule.head(), body);
 
     LOG(

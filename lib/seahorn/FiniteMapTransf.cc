@@ -234,9 +234,10 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
     if (bind::isFiniteMapConst(mr)) { // if variable, use its expansion
       if (fmei.m_fmapVarTransf.count(mr) == 0) {
         // if no expansion is found, create a finite map with fresh consts
-        mr = mkEmptyConstMap(mr, fmei);
+        // Expr mrEmpty = mkEmptyConstMap(mr, fmei);
+	// errs() << "Expansion not found for " << *mr << "\n\t" << *mrEmpty << "\n";
+	mr = mkEmptyConstMap(mr, fmei);
         mrDefk = finite_map::fmapDefKeys(mr);
-        errs() << "Expansion not found " << *mr << "\n";
       } else {
         mr = fmei.m_fmapVarTransf[mr];
       }
@@ -384,9 +385,16 @@ static bool returnsFiniteMap(Expr e) {
          bind::isFiniteMapConst(e); // this check is done before rewriting
 }
 
+bool FiniteMapBodyVisitor::isRewriteFiniteMapOp(Expr e) {
+  return isOpX<CONST_FINITE_MAP>(e) || isOpX<GET>(e) || isOpX<SET>(e);
+  // we are not visiting CONST_FINITE_MAP_KEYS and DEFAULT
+}
+
+
 VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
 
-  if (isRewriteFiniteMapOp(exp))
+  // if (isRewriteFiniteMapOp(exp))
+  if(isOpX<CONST_FINITE_MAP>(exp) || isOpX<GET>(exp) || isOpX<SET>(exp))
     return VisitAction::changeDoKidsRewrite(exp, m_rw);
   else if (isOpX<EQ>(exp)) {
     if (returnsFiniteMap(exp->left()) || returnsFiniteMap(exp->right())) {
@@ -396,13 +404,9 @@ VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
     }
   } else if (bind::IsConst()(exp) || bind::isFdecl(exp))
     return VisitAction::skipKids();
-  else
-    return VisitAction::doKids();
+  
+  return VisitAction::doKids();
 }
 
-bool FiniteMapBodyVisitor::isRewriteFiniteMapOp(Expr e) {
-  return isOpX<CONST_FINITE_MAP>(e) || isOpX<GET>(e) || isOpX<SET>(e);
-  // we are not visiting CONST_FINITE_MAP_KEYS and DEFAULT
-}
 
 } // namespace seahorn
