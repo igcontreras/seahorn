@@ -23,17 +23,18 @@ static Expr mkVarGet(Expr mapConst, Expr k, Expr vTy) {
 
 // \brief rewrites a map into separate scalar variables. New arguments are added
 // to `newArgs`, new unifications are added to `extra_unifs`
-void mkVarsMap(Expr map, const ExprVector &keys, Expr vTy,
+template <typename Range>
+void mkVarsMap(Expr map, const Range &keys, int nKs, Expr kTy, Expr vTy,
                ExprVector::iterator &newArg_it, ExprVector &extra_unifs,
                ExprSet &evars) {
 
-  Expr v;
-  ExprVector map_values(keys.size()), map_keys(keys.size());
+  Expr v, key;
+  ExprVector map_values(nKs), map_keys(nKs);
   auto v_it = map_values.begin(), k_it = map_keys.begin();
+  Expr mapName = bind::name(bind::fname(map));
 
   for (auto k : keys) {
-    Expr key = bind::mkConst(variant::tag(bind::name(bind::fname(map)), k),
-                             bind::rangeTy(bind::fname(keys[0])));
+    key = bind::mkConst(variant::tag(mapName, k), kTy);
     *k_it++ = key;
     v = mkVarGet(map, key, vTy);
     *v_it++ = v;
@@ -60,7 +61,7 @@ static Expr mkFappArgsCore(Expr fapp, Expr newFdecl, ExprVector &extraUnifs,
   assert(bind::isFdecl(fdecl));
   Expr fname = bind::fname(fdecl);
 
-  ExprVector newArgs(newFdecl->arity() - 2); // 2: fname + ret
+  ExprVector newArgs(newFdecl->arity() - 2); // 2: fname, ret
 
   auto arg_it = ++(fapp->args_begin()), t_it = ++(fdecl->args_begin());
   auto nArg_it = newArgs.begin();
@@ -82,11 +83,12 @@ static Expr mkFappArgsCore(Expr fapp, Expr newFdecl, ExprVector &extraUnifs,
       }
 
       Expr ksTy = sort::finiteMapKeyTy(argTy);
-      ExprVector keys(ksTy->args_begin(), ksTy->args_end());
+      auto keys = llvm::make_range(ksTy->args_begin(), ksTy->args_end());
       Expr lmdKeys = finite_map::mkKeys(keys, efac);
 
-      mkVarsMap(map_var_name, keys, sort::finiteMapValTy(argTy), nArg_it,
-                extraUnifs, evars);
+      mkVarsMap(map_var_name, keys, ksTy->arity(),
+                bind::rangeTy(bind::fname(ksTy->arg(0))),
+                sort::finiteMapValTy(argTy), nArg_it, extraUnifs, evars);
       // new arguments are added to `newArgs` in the function above
     } else {
       assert(!bind::isFiniteMapConst(arg));
@@ -102,17 +104,15 @@ Expr FiniteMapArgRewriter::operator()(Expr exp) {
     Expr head = exp->right();
     Expr fdecl = head->first();
 
-    if (m_pred_decl_t.count(fdecl) > 0) { // needs to be transformed
-      ExprVector newUnifs;
-      Expr newFapp = mkFappArgsCore(head, m_pred_decl_t.find(fdecl)->second,
-                                    newUnifs, m_evars, m_efac);
+    ExprVector newUnifs;
+    Expr newFapp = mkFappArgsCore(head, m_pred_decl_t.find(fdecl)->second,
+                                  newUnifs, m_evars, m_efac);
 
-      Expr body = exp->left();
-      Expr newBody =
-          newUnifs.empty() ? body : boolop::land(boolop::land(newUnifs), body);
+    Expr body = exp->left();
+    Expr newBody =
+        newUnifs.empty() ? body : boolop::land(boolop::land(newUnifs), body);
 
-      return boolop::limp(newBody, newFapp);
-    }
+    return boolop::limp(newBody, newFapp);
   } else if (isOpX<FAPP>(exp)) {
     ExprVector newUnifs;
     Expr newExp =
@@ -127,20 +127,17 @@ Expr FiniteMapArgRewriter::operator()(Expr exp) {
 // rewrite bottom_up
 VisitAction FiniteMapArgsVisitor::operator()(Expr exp) {
 
-  if (isOpX<IMPL>(exp)) // rule (or implication inside rule?)
-    if (!bind::isFapp(exp->right()))
-      return VisitAction::doKids();
-    else
-      return VisitAction::changeDoKids((*m_rw)(exp));
-  else if (bind::IsConst()(exp))
+  if (isOpX<IMPL>(exp) && bind::isFapp(exp->right()) &&
+      m_pred_decl_t.count(exp->right()->first()) >
+          0) // rule (or implication inside rule?)
+    return VisitAction::changeDoKids((*m_rw)(exp));
+  else if (bind::IsConst()(exp) ||
+           bind::isFdecl(exp)) // TODO: more cases to skip?
     return VisitAction::skipKids();
-  else if (bind::isFdecl(exp))
-    return VisitAction::skipKids();
-  else if (bind::isFapp(exp))
-    if (m_pred_decl_t.count(bind::name(exp)) > 0)
-      return VisitAction::changeDoKids((*m_rw)(exp));
-    else
-      return VisitAction::doKids();
+  else if (bind::isFapp(exp) && m_pred_decl_t.count(bind::name(exp)) > 0)
+    return VisitAction::changeDoKidsRewrite(exp, m_rw);
+
+  return VisitAction::doKids();
 }
 
 } // namespace seahorn
@@ -159,7 +156,6 @@ static Expr mkFMapPrimitiveArgCore(Expr map, FMapExprsInfo &fmei) {
   Expr lmdKeys = fmei.m_typeLmd[map];
   Expr fmTy = fmei.m_type[map];
   Expr vTy = sort::finiteMapValTy(fmTy);
-  Expr ksTy = sort::finiteMapKeyTy(fmTy);
 
   LOG("fmap_transf", errs()
                          << "-- mkFMapPrimitiveArgCore arg: " << *map << "\n");
@@ -173,15 +169,15 @@ static Expr mkFMapPrimitiveArgCore(Expr map, FMapExprsInfo &fmei) {
 
   if (isOpX<CONST_FINITE_MAP>(map)) { // transform map definition to lambda
     // the map is a map definition
-    Expr defk = finite_map::fmapDefKeys(map);
     if (!finite_map::isInitializedFiniteMap(map)) { // non init values
       return finite_map::mkEmptyMap(finite_map::fmapDefDefault(map)->left());
     } else {
+      Expr defk = finite_map::fmapDefKeys(map);
       Expr valuesE = finite_map::fmapDefValues(map);
-      ExprVector values(valuesE->args_begin(), valuesE->args_end());
-      ExprVector keys(defk->args_begin(), defk->args_end());
-      return finite_map::mkInitializedMap(keys, vTy, values, lmdKeys,
-                                          fmei.m_efac);
+      return finite_map::mkInitializedMap(
+          llvm::make_range(defk->args_begin(), defk->args_end()), vTy,
+          llvm::make_range(valuesE->args_begin(), valuesE->args_end()), lmdKeys,
+          fmei.m_efac);
     }
   } else // already transformed map: default-map or ite expr
     return map;
@@ -202,11 +198,11 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
   Expr vTy = sort::finiteMapValTy(mapTy);
   Expr keysTy = sort::finiteMapKeyTy(mapTy);
 
-  ExprVector keys;// (keysTy->arity() - 1); // TODO
   for (auto k_it = keysTy->args_begin(); k_it != keysTy->args_end(); k_it++) {
     fmei.m_vars.insert(*k_it);
-    keys.push_back(*k_it);
   }
+
+  auto keys = llvm::make_range(keysTy->args_begin(), keysTy->args_end());
 
   Expr defaultV = bind::mkConst(variant::variant(0, mapConst), vTy);
   fmei.m_vars.insert(defaultV);
@@ -272,9 +268,12 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
   assert(mrDefk);
   assert(mlDefk);
 
-  ExprVector conj;
+  ExprVector conj(mlDefk->arity() *
+                  2); // 2: one for the key and one for the value
   auto l_it = mlDefk->args_begin();
   auto r_it = mrDefk->args_begin();
+  auto conj_it = conj.begin();
+
   for (int i = 0; l_it != mlDefk->args_end(); i++, l_it++, r_it++) {
     // unify keys (from the definition)
     if (r_it == mrDefk->args_end()) {
@@ -282,10 +281,10 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
              << "\n";
     }
     assert(r_it != mrDefk->args_end());
-    conj.push_back(mk<EQ>(*l_it, *r_it));
+    *conj_it++ = mk<EQ>(*l_it, *r_it);
     // unify values
-    conj.push_back(mk<EQ>(getValueAtDef(ml, lksl, mlDefk->arg(i), i),
-                          getValueAtDef(mr, lksr, mrDefk->arg(i), i)));
+    *conj_it++ = mk<EQ>(getValueAtDef(ml, lksl, mlDefk->arg(i), i),
+                        getValueAtDef(mr, lksr, mrDefk->arg(i), i));
   }
   return boolop::land(conj);
 }
@@ -301,9 +300,8 @@ static Expr mkDefFMapCore(Expr map, FMapExprsInfo &fmei) {
   Expr defk = finite_map::fmapDefKeys(map);
   Expr vTy = bind::typeOf(finite_map::fmapDefDefault(map)->left());
 
-  ExprVector keys(defk->args_begin(), defk->args_end());
-  Expr fmTy = sort::finiteMapTy(vTy, keys);
-  fmei.m_type[map] = fmTy;
+  auto keys = llvm::make_range(defk->args_begin(), defk->args_end());
+  fmei.m_type[map] = sort::finiteMapTy(vTy, keys);
   fmei.m_typeLmd[map] = finite_map::mkKeys(keys, fmei.m_efac);
 
   return map;
@@ -313,16 +311,14 @@ static Expr mkDefFMapCore(Expr map, FMapExprsInfo &fmei) {
 static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
 
   LOG("fmap_transf", errs() << "-- mkGetCore " << *map << " " << *key << "\n";);
-  Expr lmdKeys;
+
   if (fmei.m_typeLmd.count(map) == 0) {
     assert(bind::isFiniteMapConst(map));
     mkEmptyConstMap(map, fmei);
   }
-  lmdKeys = fmei.m_typeLmd[map];
 
-  assert(lmdKeys);
-
-  return finite_map::mkGetVal(mkFMapPrimitiveArgCore(map, fmei), lmdKeys, key);
+  return finite_map::mkGetVal(mkFMapPrimitiveArgCore(map, fmei),
+                              fmei.m_typeLmd[map], key);
 }
 
 // -- rewrites a map set primitive
