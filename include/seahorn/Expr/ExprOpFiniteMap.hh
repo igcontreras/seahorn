@@ -47,7 +47,7 @@ NOP(SET, "set", FUNCTIONAL, FiniteMapOp, typeCheck::finiteMapType::Set)
 namespace typeCheck {
 namespace finiteMapType {
 
-struct ValuesKeys  : public TypeCheckBase{
+struct ValuesKeys : public TypeCheckBase {
   /// ensures that all children are the same type
   /// \return the type of its children
   inline Expr inferType(Expr exp, TypeChecker &tc) {
@@ -59,7 +59,7 @@ struct ValuesKeys  : public TypeCheckBase{
         exp, tc, returnFn); // children can by of any type
   }
 };
-struct ValuesDefault  : public TypeCheckBase{
+struct ValuesDefault : public TypeCheckBase {
   /// ensures that there is 1 child
   /// \return the type of its child
   inline Expr inferType(Expr exp, TypeChecker &tc) {
@@ -72,9 +72,9 @@ struct ValuesDefault  : public TypeCheckBase{
   }
 };
 
-struct FiniteMap  : public TypeCheckBase{
-  /// ensures that the left child is a valid key type, and right is a valid value
-  /// \return: FINITE_MAP_TY
+struct FiniteMap : public TypeCheckBase {
+  /// ensures that the left child is a valid key type, and right is a valid
+  /// value \return: FINITE_MAP_TY
   inline Expr inferType(Expr exp, TypeChecker &tc) {
     if (exp->arity() != 2 && exp->arity() != 3)
       return sort::errorTy(exp->efac());
@@ -88,7 +88,7 @@ struct FiniteMap  : public TypeCheckBase{
     if (!isOp<FINITE_MAP_VAL_DEFAULT>(defval))
       return sort::errorTy(exp->efac());
 
-    if(exp->arity() == 3){
+    if (exp->arity() == 3) {
       Expr vals = exp->last();
       // TODO: check that all values are of the type of the default
       if (isOp<CONST_FINITE_MAP_VALUES>(vals)) {
@@ -104,22 +104,21 @@ struct FiniteMap  : public TypeCheckBase{
   }
 };
 
-static inline bool checkMap(Expr exp, TypeChecker &tc,
-                            unsigned numChildren) {
+static inline bool checkMap(Expr exp, TypeChecker &tc, unsigned numChildren) {
   return exp->arity() == numChildren &&
          correctTypeAny<FINITE_MAP_TY>(exp->first(), tc);
 }
 
-static inline void getFiniteMapTypes(Expr exp, TypeChecker &tc,
-                                     Expr &mapTy, Expr &indexTy, Expr &valTy) {
+static inline void getFiniteMapTypes(Expr exp, TypeChecker &tc, Expr &mapTy,
+                                     Expr &indexTy, Expr &valTy) {
   mapTy = tc.typeOf(exp->left());
   indexTy =
       tc.typeOf(sort::finiteMapKeyTy(mapTy)
-                        ->first()); // type of: FINITE_MAP_KEYS_TY -> first key
+                    ->first()); // type of: FINITE_MAP_KEYS_TY -> first key
   valTy = sort::finiteMapValTy(mapTy);
 }
 
-struct Get  : public TypeCheckBase{
+struct Get : public TypeCheckBase {
   /// ensures that the expression's index type matches the map's index type
   /// checks for the following children (in order): map, index
   /// \return the map's value type
@@ -130,14 +129,13 @@ struct Get  : public TypeCheckBase{
   }
 };
 
-struct Set  : public TypeCheckBase{
-  /// ensures that the index type and value type match the map's index and value types
-  /// checks for the following children (in order): map, index, value
+struct Set : public TypeCheckBase {
+  /// ensures that the index type and value type match the map's index and value
+  /// types checks for the following children (in order): map, index, value
   /// \return FINITE_MAP_TY
   /// \note this is the same as array store
   inline Expr inferType(Expr exp, TypeChecker &tc) {
-    return typeCheck::mapType::store<FINITE_MAP_TY>(exp, tc,
-                                                    getFiniteMapTypes);
+    return typeCheck::mapType::store<FINITE_MAP_TY>(exp, tc, getFiniteMapTypes);
   }
 };
 
@@ -150,7 +148,8 @@ namespace op {
 namespace finite_map {
 
 // --------------- finite map primitives ---------------------
-inline Expr constFiniteMapValues(const ExprVector &values) {
+template <typename Range>
+inline Expr constFiniteMapValues(const Range &values) {
   return mknary<CONST_FINITE_MAP_VALUES>(values.begin(), values.end());
 }
 
@@ -158,22 +157,22 @@ inline Expr constFiniteMapDefault(Expr def) {
   return mk<FINITE_MAP_VAL_DEFAULT>(def);
 }
 
-inline Expr constFiniteMapKeys(const ExprVector &keys) {
-  assert(keys.size() > 0);
+template <typename Range> inline Expr constFiniteMapKeys(const Range &keys) {
   return mknary<CONST_FINITE_MAP_KEYS>(keys.begin(), keys.end());
 }
 
 // \brief builds an empty map term. `e` is the default for the unitialized
 // values
-inline Expr constFiniteMap(const ExprVector &keys, Expr def) {
+template <typename Range>
+inline Expr constFiniteMap(const Range &keys, Expr def) {
   return mk<CONST_FINITE_MAP>(constFiniteMapKeys(keys),
                               constFiniteMapDefault(def));
 }
 
 // construct when ALL the values of the map are known (they can be
 // variables)
-inline Expr constFiniteMap(const ExprVector &keys,
-                           Expr def, const ExprVector &values) {
+template <typename Range>
+inline Expr constFiniteMap(const Range &keys, Expr def, const Range &values) {
   assert(keys.size() == values.size());
   return mk<CONST_FINITE_MAP>(constFiniteMapKeys(keys),
                               constFiniteMapDefault(def),
@@ -193,7 +192,7 @@ inline Expr fmapDefValues(Expr fmap) {
 }
 
 inline bool isInitializedFiniteMap(Expr m) {
-  if(isOpX<CONST_FINITE_MAP>(m))
+  if (isOpX<CONST_FINITE_MAP>(m))
     return isOpX<CONST_FINITE_MAP_VALUES>(m->last());
 
   return false;
@@ -207,7 +206,8 @@ inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
 inline Expr mkEmptyMap(Expr edef) { return edef; }
 
 // creates a set of keys as a lambda function
-inline Expr mkKeys(const ExprVector &keys, ExprFactory &efac) {
+template <typename Range>
+inline Expr mkKeys(const Range &keys, ExprFactory &efac) {
 
   Expr lmdTmp = mkTerm<mpz_class>(0, efac);
   // default value for th lambda keys: a key not defined in the fmap
@@ -237,9 +237,9 @@ inline Expr mkKeys(const ExprVector &keys, ExprFactory &efac) {
 }
 
 // \brief creates a map for keys and values, assuming that they are sorted
-inline Expr mkInitializedMap(const ExprVector &keys, Expr vTy,
-                             const ExprVector &values, const Expr lmdKeys,
-                             ExprFactory &efac) {
+template <typename Range>
+inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
+                             const Expr lmdKeys, ExprFactory &efac) {
 
   // assuming that there is a value for every key. If this is not available,
   // "initialize" it with the default value for uninitialized memory
