@@ -35,18 +35,15 @@ struct FMapExprsInfo {
         m_fmapVarTransf(fmapVarTransf), m_efac(efac) {}
 };
 
-// Rewrites a finite map operation to remove finite map terms. The arguments
-// of the operation are assumed to be already rewritten (no finite map
-// terms). The rewriter needs to be initialized for every clause
-class FiniteMapRewriter : public std::unary_function<Expr, Expr> {
-  // put Expr as a friend class have access to expr->args()??
-
-  FMapExprsInfo m_fmei;
+class FiniteMapArgRewriter : public std::unary_function<Expr, Expr> {
+  ExprSet &m_evars;
+  const ExprMap &m_pred_decl_t;
+  ExprFactory &m_efac;
 
 public:
-  FiniteMapRewriter(ExprSet &evars, ExprMap &expr_type, ExprMap &type_lambda,
-                    ExprMap &fmapDef, ExprMap &fmapVarDef, ExprFactory &efac)
-      : m_fmei(evars, expr_type, type_lambda, fmapDef, fmapVarDef, efac){};
+  FiniteMapArgRewriter(ExprSet &evars, const ExprMap &pred_decl_t,
+                       ExprFactory &efac)
+      : m_evars(evars), m_pred_decl_t(pred_decl_t), m_efac(efac){};
 
   Expr operator()(Expr exp);
 };
@@ -58,13 +55,33 @@ private:
   const ExprMap &m_pred_decl_t;
   ExprFactory &m_efac;
   ExprSet &m_evars;
+  std::shared_ptr<FiniteMapArgRewriter> m_rw;
 
 public:
   FiniteMapArgsVisitor(ExprSet &evars, const ExprMap &pred_decl_t,
                        ExprFactory &efac)
-      : m_evars(evars), m_pred_decl_t(pred_decl_t), m_efac(efac) {}
+      : m_evars(evars), m_pred_decl_t(pred_decl_t), m_efac(efac) {
+    m_rw = std::make_shared<FiniteMapArgRewriter>(evars, m_pred_decl_t, efac);
+  }
 
   VisitAction operator()(Expr exp);
+};
+
+// Rewrites a finite map operation to remove finite map terms. The arguments
+// of the operation are assumed to be already rewritten (no finite map
+// terms). The rewriter needs to be initialized for every clause
+class FiniteMapBodyRewriter : public std::unary_function<Expr, Expr> {
+  // put Expr as a friend class have access to expr->args()??
+
+  FMapExprsInfo m_fmei;
+
+public:
+  FiniteMapBodyRewriter(ExprSet &evars, ExprMap &expr_type,
+                        ExprMap &type_lambda, ExprMap &fmapDef,
+                        ExprMap &fmapVarDef, ExprFactory &efac)
+      : m_fmei(evars, expr_type, type_lambda, fmapDef, fmapVarDef, efac){};
+
+  Expr operator()(Expr exp);
 };
 
 // Bottom-up visitor to rewrite maps in bodies
@@ -75,18 +92,18 @@ private:
   ExprMap m_map_lambda;
   ExprMap m_fmapDef;
   ExprMap m_fmapVarDef;
-  std::shared_ptr<FiniteMapRewriter> m_rw;
+  std::shared_ptr<FiniteMapBodyRewriter> m_rw;
 
 public:
   FiniteMapBodyVisitor(ExprSet &evars, ExprFactory &efac) {
-    m_rw = std::make_shared<FiniteMapRewriter>(evars, m_types, m_map_lambda,
+    m_rw = std::make_shared<FiniteMapBodyRewriter>(evars, m_types, m_map_lambda,
                                                m_fmapDef, m_fmapVarDef, efac);
   }
 
   VisitAction operator()(Expr exp);
 
 private:
-  bool isVisitFiniteMapOp(Expr e);
+  bool isRewriteFiniteMapOp(Expr e);
 };
 
 } // namespace seahorn
