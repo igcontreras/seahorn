@@ -899,9 +899,9 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       if (idx && v) {
         Expr store;
         if (bind::isFiniteMapConst(m_inMem))
-	  store = op::finite_map::set(m_inMem, idx, v);
+          store = op::finite_map::set(m_inMem, idx, v);
         else {
-	  store = op::array::store(m_inMem, idx, v);
+          store = op::array::store(m_inMem, idx, v);
         }
         side(m_outMem, store, !ArrayGlobalConstraints);
       }
@@ -1302,14 +1302,14 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     Expr argE = s.read(symb(*gv));
     csi.m_fparams.push_back(argE);
     const Cell &c = calleeG.getCell(*gv);
-    if (!EnableUniqueScalars || hasOrigArraySymbol(c,MemOpt::IN)) {
-      Expr memE = getOrigMemSymbol(c,MemOpt::IN);
-      if(bind::isArrayConst(memE)){
-	unsigned init_fields = g_im_stats.m_fields_copied;
-	VCgenArg(calleeG.getCell(*gv), argE, unsafeNodesCaller, simMap, side);
-	LOG("inter_mem_counters", g_im_stats.m_n_gv++;
-	    if (init_fields < g_im_stats.m_fields_copied)
-	      g_im_stats.m_gv_copied++;);
+    if (!EnableUniqueScalars || hasOrigArraySymbol(c, MemOpt::IN)) {
+      Expr memE = getOrigMemSymbol(c, MemOpt::IN);
+      if (bind::isArrayConst(memE)) {
+        unsigned init_fields = g_im_stats.m_fields_copied;
+        VCgenArg(calleeG.getCell(*gv), argE, unsafeNodesCaller, simMap, side);
+        LOG("inter_mem_counters", g_im_stats.m_n_gv++;
+            if (init_fields < g_im_stats.m_fields_copied)
+                g_im_stats.m_gv_copied++;);
       }
     }
   }
@@ -1399,7 +1399,8 @@ void MemUfoOpSem::addArraySymbol(const Cell &c, Expr A, MemOpt ao) {
   NodeIdMap &map = getOrigMap(ao);
 
   LOG("inter_mem", errs() << "<-- addArraySymbol " << *A << "\n"
-             << " " << c.getNode() << " " << getOffset(c) << "\n";);
+                          << " " << c.getNode() << " " << getOffset(c)
+                          << "\n";);
   map.insert({{c.getNode(), getOffset(c)}, A});
 }
 
@@ -1497,7 +1498,8 @@ void MemUfoOpSem::recVCGenMem(const Cell &c_callee, Expr ptr,
 
       Cell c_callee_field(c_callee, offset);
       Cell c_caller_field = simMap.get(c_callee_field);
-      if (!isMemScalar(c_caller_field)) // if the field is represented with a scalar, skip the copy
+      if (!isMemScalar(c_caller_field)) // if the field is represented with a
+                                        // scalar, skip the copy
         continue;
 
       // create a new name for that array if it was not created
@@ -1531,12 +1533,12 @@ void MemUfoOpSem::recVCGenMem(const Cell &c_callee, Expr ptr,
 
     if (explored.find(next_n) == explored.end()) { // not explored yet
       Expr next_ptr;
-      if(bind::isArrayConst(origA) || isOpX<STORE>(origA)){ // TODO: use infer type?
-	Expr offset = mkTerm<expr::mpz_class>(f.getOffset(), m_efac);
-	next_ptr = op::array::select(origA, mk<PLUS>(ptr, offset));
-      }
-      else
-	next_ptr = origA; // mem represented with a scalar
+      if (bind::isArrayConst(origA) ||
+          isOpX<STORE>(origA)) { // TODO: use infer type?
+        Expr offset = mkTerm<expr::mpz_class>(f.getOffset(), m_efac);
+        next_ptr = op::array::select(origA, mk<PLUS>(ptr, offset));
+      } else
+        next_ptr = origA; // mem represented with a scalar
 
       recVCGenMem(next_c, next_ptr, unsafeNodes, simMap, explored, side);
     }
@@ -1545,7 +1547,7 @@ void MemUfoOpSem::recVCGenMem(const Cell &c_callee, Expr ptr,
 
 // TODO: this is a generic version, in this semantics checking finite
 // maps is not necessary, specialize in FMapUfoOpSem?
-bool MemUfoOpSem::isMemScalar(const Cell &c){
+bool MemUfoOpSem::isMemScalar(const Cell &c) {
 
   Expr memE;
   if (hasOrigArraySymbol(c, MemOpt::IN))
@@ -1560,8 +1562,8 @@ bool MemUfoOpSem::isMemScalar(const Cell &c){
   return bind::isArrayConst(memE) || bind::isFiniteMapConst(memE);
 }
 
-// -- stores the name(s) of the array(s) that represents every cell involved in the
-// CallSite
+// -- stores the name(s) of the array(s) that represents every cell involved in
+// the CallSite
 void MemUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
 
   unsigned i = csi.m_fparams.size() - 1;
@@ -1575,7 +1577,7 @@ void MemUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
       break;
 
     Function *f_callee = ci->getCalledFunction();
-    if(f_callee == nullptr)
+    if (f_callee == nullptr)
       break;
 
     if (f_callee->getName().equals("shadow.mem.arg.ref"))
@@ -1651,30 +1653,32 @@ Expr FMapUfoOpSem::symb(const Value &V) {
         const Function *F = i->getParent()->getParent();
 
         if (const CallInst *CI = dyn_cast<const CallInst>(&V)) {
-	  LOG("fmap_symb",
-            errs() << "Variable of: " << F->getGlobalIdentifier() << "\n";);
-	  LOG("fmap_symb", errs() << "Instruction: " << *i << "\n");
-          
+          LOG("fmap_symb",
+              errs() << "Variable of: " << F->getGlobalIdentifier() << "\n";
+              errs() << "Instruction: " << *i << "\n");
+
           auto opt_c = m_shadowDsa->getShadowMemCell(*CI);
           assert(opt_c.hasValue());
           const Node &n = *const_cast<Node *>(opt_c.getValue().getNode());
-	  LOG("fmap_symb", n.dump());
 
           unsigned nKs =
               m_preproc->getNumAccesses(&n, F); // this should be by cell
-          
+
           if (nKs > 0) {
             Expr v = mkTerm<const Value *>(&V, m_efac); // same name as array
                                                         // but different sort
-            ExprVector keys;
-            for (int i = 0; i < nKs; i++)
-              keys.push_back(bind::intConst(
-                  variant::variant(i, variant::tag(v, m_keyBase))));
+            ExprVector keys(nKs);
+            auto ks_it = keys.begin();
+
+            for (int i = 0; i < nKs; i++, ks_it++)
+              *ks_it = bind::intConst(
+                  variant::variant(i, variant::tag(v, m_keyBase)));
 
             Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
             LOG("fmap_symb", errs() << *v << ": "
-                                 << *sort::finiteMapTy(intTy, keys) << "\nnode:";
-		n.dump());
+                                    << *sort::finiteMapTy(intTy, keys)
+                                    << "\nnode:";
+                n.dump());
 
             return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
           }
@@ -1692,7 +1696,7 @@ Expr FMapUfoOpSem::symb(const Value &V) {
 
 static bool checkArgs(Expr fapp) {
 
-  if(fapp->arity() == 0)
+  if (fapp->arity() == 0)
     return true;
 
   Expr fdecl = bind::name(fapp);
@@ -1701,13 +1705,13 @@ static bool checkArgs(Expr fapp) {
 
   for (; arg_it != fapp->args_end(); arg_it++, t_it++) {
     Expr arg = *arg_it;
-    if(bind::IsConst()(arg)){
+    if (bind::IsConst()(arg)) {
       Expr argTy = *t_it;
-      if(!isOpX<FINITE_MAP_TY>(argTy)){
-	assert(bind::rangeTy(bind::fname(arg)) == argTy);
-      }
-      else {
-	assert(arg->left()->right()->right()->arity() == argTy->right()->arity());
+      if (!isOpX<FINITE_MAP_TY>(argTy)) {
+        assert(bind::rangeTy(bind::fname(arg)) == argTy);
+      } else {
+        assert(arg->left()->right()->right()->arity() ==
+               argTy->right()->arity());
       }
     }
   }
@@ -1780,38 +1784,45 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       csi.m_fparams[i] = fmap; // replace mem param
 
       LOG("fmap_opsem", errs() << "\t" << *param->left() << " : replaced by \n "
-	  << "\t    " << *fmap->left() << "\n";);
-    } else if (isOpX<ARRAY_TY>(fi.sumPred->arg(i+1)) && // fi.sumpPred->arg(0) is the function name
-               bind::isFiniteMapConst(param)) {
-      LOG("fmap-node", assert(false && "Node not expected")); // uncomment for finding oversharing
-      // -- the memory region does not exist in the bu graph of the callee but is
-      // still passed (as an array)
+                               << "\t    " << *fmap->left() << "\n";);
+    } else if (bind::isFiniteMapConst(param) &&
+               isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)))
+    // +1 because fi.sumpPred->arg(0) is the function name
+    {
+      // LOG("fmap-node",
+      //     assert(false &&
+      //            "Node not expected")); // uncomment for finding oversharing
+      // -- the memory region does not exist in the bu graph of the callee but
+      // is still passed (as an array)
       assert(m_exprCell.count(param) > 0); // initialized when processing the
                                            // shadow.mem annotations
-      const Node * n = m_exprCell[param].first;
+      const Node *n = m_exprCell[param].first;
       // -- create a fresh array (not reachable in the callee bu)
-      csi.m_fparams[i] = bind::mkConst(variant::variant(0, param), fi.sumPred->arg(i+1));
-      LOG("fmap_opsem", errs() << "fresh const " << *param->left() << " : replaced by \n "
+      csi.m_fparams[i] =
+          bind::mkConst(variant::variant(0, param), fi.sumPred->arg(i + 1));
+      LOG("fmap_opsem", errs() << "fresh const " << *param->left()
+                               << " : replaced by \n "
                                << "\t" << *csi.m_fparams[i] << "\n";);
 
-      if (i < csi.m_fparams.size()){
-	Expr nextParam = csi.m_fparams[i + 1];
-	const Node * nextN = m_exprCell[nextParam].first;
-	if (n == nextN){
-	  // -- add memOut = memIn
-	  side.push_back(mk<EQ>(param, nextParam));
-	  LOG("fmap_opsem", errs() << "new unif" << *mk<EQ>(param, nextParam) << "\n";);
-	  i++;
-	  LOG("fmap_opsem", errs() << "fresh const " << *nextParam << " : replaced by \n "
-	      << "\t" << *csi.m_fparams[i] << "\n";);
-
-	  csi.m_fparams[i] = bind::mkConst(variant::variant(0, nextParam), fi.sumPred->arg(i+1));
-	}
+      if (i < csi.m_fparams.size()) {
+        Expr nextParam = csi.m_fparams[i + 1];
+        const Node *nextN = m_exprCell[nextParam].first;
+        if (n == nextN) {
+          // -- add memOut = memIn
+          side.push_back(mk<EQ>(param, nextParam));
+          LOG("fmap_opsem",
+              errs() << "new unif" << *mk<EQ>(param, nextParam) << "\n";
+              errs() << "fresh const " << *nextParam << " : replaced by \n "
+                     << "\t" << *csi.m_fparams[i + 1] << "\n";);
+          i++;
+          csi.m_fparams[i] = bind::mkConst(variant::variant(0, nextParam),
+                                           fi.sumPred->arg(i + 1));
+        }
       }
     }
-    else {
-      LOG("fmap_opsem", errs() << "same" << *param << "\n";);
-    }
+    // else {
+    //   LOG("fmap_opsem", errs() << "same" << *param << "\n";);
+    // }
   }
 
   LOG(
@@ -1842,9 +1853,11 @@ Expr FMapUfoOpSem::fmVariant(Expr e, const ExprVector &keys) {
 
   assert(keys.size() > 0);
   Expr cTy = bind::rangeTy(bind::fname(e));
-  Expr vTy = bind::isArrayConst(e) ? sort::arrayValTy(cTy) : sort::finiteMapValTy(cTy);
+  Expr vTy =
+      bind::isArrayConst(e) ? sort::arrayValTy(cTy) : sort::finiteMapValTy(cTy);
 
-  return bind::mkConst(variant::variant(m_copy_count++, e), sort::finiteMapTy(vTy, keys));
+  return bind::mkConst(variant::variant(m_copy_count++, e),
+                       sort::finiteMapTy(vTy, keys));
 }
 
 void FMapUfoOpSem::VCgenArg(const Cell &cArgCallee, Expr basePtr,
@@ -1863,7 +1876,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
   explored.insert(n_callee);
   const Cell &c_caller = simMap.get(c_callee);
   const Node *n_caller = c_caller.getNode();
-  
+
   if (m_preproc->isSafeNode(unsafeNodes, n_caller)) {
 
     // -- copy accessed fields of the node
@@ -1873,9 +1886,10 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
 
       Cell c_callee_field(c_callee, offset);
       Cell c_caller_field = simMap.get(c_callee_field);
-      if (!isMemScalar(c_caller_field)) // if the field is represented with a scalar, skip the copy
+      if (!isMemScalar(c_caller_field)) // if the field is represented with a
+                                        // scalar, skip the copy
         continue;
-      
+
       if (hasOrigArraySymbol(c_caller_field, MemOpt::IN)) {
         // force creation of a new mem symbol for later
         getFreshMapSymbol(c_caller_field, c_callee_field, MemOpt::IN, F);
@@ -1993,10 +2007,11 @@ Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee,
   if (m_replace.count(origE) == 0) { // not copied yet
     unsigned nKs = m_preproc->getNumCIAccessesCellSummary(cCallee, &F);
 
-    ExprVector keys;
-    for (int i = 0; i < nKs; i++)
-      keys.push_back(
-          bind::intConst(variant::variant(i, variant::tag(origE, m_keyBase))));
+    ExprVector keys(nKs);
+    auto key_it = keys.begin();
+    for (int i = 0; i < nKs; i++, key_it++)
+      *key_it =
+          bind::intConst(variant::variant(i, variant::tag(origE, m_keyBase)));
 
     Expr newE = fmVariant(origE, keys);
     m_replace[origE] = newE;
@@ -2046,7 +2061,8 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side,
   Function &F = *CS.getCaller();
   Expr fmapKeysTy = sort::finiteMapKeyTy(bind::rangeTy(bind::fname(initMem)));
 
-  ExprVector keys(fmapKeysTy->args_begin(), fmapKeysTy->args_end());
+  auto keys =
+      llvm::make_range(fmapKeysTy->args_begin(), fmapKeysTy->args_end());
 
   side.push_back(
       mk<EQ>(initMem, finite_map::constFiniteMap(keys, m_fmapDefault)));
