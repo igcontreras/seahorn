@@ -173,7 +173,6 @@ inline Expr constFiniteMap(const Range &keys, Expr def) {
 // variables)
 template <typename Range>
 inline Expr constFiniteMap(const Range &keys, Expr def, const Range &values) {
-  assert(keys.size() == values.size());
   return mk<CONST_FINITE_MAP>(constFiniteMapKeys(keys),
                               constFiniteMapDefault(def),
                               constFiniteMapValues(values));
@@ -243,7 +242,6 @@ inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
 
   // assuming that there is a value for every key. If this is not available,
   // "initialize" it with the default value for uninitialized memory
-  assert(keys.size() == values.size());
 
   Expr lmdMap;
   // if the vcgen is done correctly '0' should never be reached, put as default
