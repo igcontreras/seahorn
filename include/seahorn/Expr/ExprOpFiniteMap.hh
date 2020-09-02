@@ -201,8 +201,8 @@ inline Expr get(Expr map, Expr idx) { return mk<GET>(map, idx); }
 inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
 
 // --------------- transformation to lambda functions ------------------------
-// \brief the empty map is just the default value `edef`
-inline Expr mkEmptyMap(Expr edef) { return edef; }
+// \brief the empty map is just the default value `defaultV`
+inline Expr mkEmptyMap(Expr defaultV) { return defaultV; }
 
 // creates a set of keys as a lambda function
 template <typename Range>
@@ -224,32 +224,21 @@ inline Expr mkKeys(const Range &keys, ExprFactory &efac) {
   //
   // the lambda function returns the position of the value corresponding to a
   // key in the lambda term that represents the values
-  for (auto key : keys) {
-    Expr nA = mkTerm<mpz_class>(count, efac);
-    Expr cmp = mk<EQ>(key, keyToPos);
-    Expr ite = boolop::lite(cmp, nA, op::bind::betaReduce(lmdTmp, keyToPos));
-    lmdTmp = bind::abs<LAMBDA>(std::array<Expr, 1>{keyToPos}, ite);
-    count++;
-  }
+  for (auto key : keys)
+    lmdTmp = boolop::lite(mk<EQ>(key, keyToPos), mkTerm<mpz_class>(count++, efac),
+                          lmdTmp);
 
-  return lmdTmp;
+  return bind::abs<LAMBDA>(std::array<Expr, 1>{keyToPos}, lmdTmp);
 }
 
 // \brief creates a map for keys and values, assuming that they are sorted
 template <typename Range>
 inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
-                             const Expr lmdKeys, ExprFactory &efac) {
+                             Expr defaultV, const Expr lmdKeys) {
 
+  ExprFactory &efac = vTy->efac();
   // assuming that there is a value for every key. If this is not available,
   // "initialize" it with the default value for uninitialized memory
-
-  Expr lmdMap;
-  // if the vcgen is done correctly '0' should never be reached, put as default
-  // value values[0]?
-  if (isOpX<INT_TY>(vTy))
-    lmdMap = mkTerm<mpz_class>(0, efac);
-  else
-    lmdMap = bv::bvnum(mkTerm<mpz_class>(0, efac), vTy);
 
   Expr y = bind::mkConst(mkTerm<std::string>("y", efac), vTy);
   // internal variable for the values lambda term, it must be of the value kind
@@ -257,19 +246,15 @@ inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
   // assuming that mkKeys assigns the position in the map starting at 1
   unsigned count = 1;
 
+  Expr lmdMap = defaultV;
   // we create lmd expressions for the map values of the form:
   //
-  // l1 x.(ite (x == 1) v1 non-det)
+  // l1 x.(ite (x == 1) v1 defaultV)
   // ln x.(ite (x == n) vn (ln-1 x))
-  for (auto v : values) {
-    Expr keyToPos = mkTerm<mpz_class>(count, efac);
-    Expr cmp = mk<EQ>(y, keyToPos);
-    Expr ite = boolop::lite(cmp, v, op::bind::betaReduce(lmdMap, y));
-    lmdMap = bind::abs<LAMBDA>(std::array<Expr, 1>{y}, ite);
-    count++;
-  }
+  for (auto v : values)
+    lmdMap = boolop::lite(mk<EQ>(y, mkTerm<mpz_class>(count++, efac)), v, lmdMap);
 
-  return lmdMap;
+  return bind::abs<LAMBDA>(std::array<Expr, 1>{y}, lmdMap);
 }
 
 /// \brief Constructs get expression. Non-simplifying. None of the parameters
@@ -290,8 +275,8 @@ inline Expr mkGetVal(Expr lmdMap, Expr lmdKeys, Expr key) {
 /// should contain map terms, they should be expanded to lambdas
 //      `lmdMap` contains the values of the map as a lambda term
 //      `lmdKeys` represents the keys of the map as a lambda term
-inline Expr mkSetVal(Expr lmdMap, Expr lmdKeys, Expr key, Expr value,
-                     ExprFactory &efac) {
+inline Expr mkSetVal(Expr lmdMap, Expr lmdKeys, Expr key, Expr value) {
+  ExprFactory &efac = lmdMap->efac();
 
   // assert(isOpX<LAMBDA>(lmdMap));
   // lmdMap may be a lambda or the default value: a number or a const.

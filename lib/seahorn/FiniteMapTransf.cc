@@ -176,8 +176,8 @@ static Expr mkFMapPrimitiveArgCore(Expr map, FMapExprsInfo &fmei) {
       Expr valuesE = finite_map::fmapDefValues(map);
       return finite_map::mkInitializedMap(
           llvm::make_range(defk->args_begin(), defk->args_end()), vTy,
-          llvm::make_range(valuesE->args_begin(), valuesE->args_end()), lmdKeys,
-          fmei.m_efac);
+          llvm::make_range(valuesE->args_begin(), valuesE->args_end()),
+          finite_map::fmapDefDefault(map)->first(), lmdKeys);
     }
   } else // already transformed map: default-map or ite expr
     return map;
@@ -334,10 +334,8 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
   lmdKeys = fmei.m_typeLmd[map];
   assert(lmdKeys);
 
-  Expr fmTy = fmei.m_type[map];
-
   Expr procMap = mkFMapPrimitiveArgCore(map, fmei);
-  Expr res = finite_map::mkSetVal(procMap, lmdKeys, key, value, fmei.m_efac);
+  Expr res = finite_map::mkSetVal(procMap, lmdKeys, key, value);
 
   if (isOpX<CONST_FINITE_MAP>(map))
     fmei.m_fmapDefk[res] = finite_map::fmapDefKeys(map);
@@ -345,7 +343,7 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
     fmei.m_fmapDefk[res] = fmei.m_fmapDefk[map];
 
   fmei.m_typeLmd[res] = lmdKeys;
-  fmei.m_type[res] = fmTy;
+  fmei.m_type[res] = fmei.m_type[map];
 
   return res;
 }

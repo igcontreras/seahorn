@@ -203,7 +203,7 @@ TEST_CASE("expr.finite_map.mkSetVal") {
 
   Expr map = finite_map::mkEmptyMap(mkInt(0, efac));
   // set the value of k1
-  map = finite_map::mkSetVal(map, lambda_keys, k1, mkInt(42, efac), efac);
+  map = finite_map::mkSetVal(map, lambda_keys, k1, mkInt(42, efac));
 
   CHECK(boost::lexical_cast<std::string>(map) ==
         "(lambda (INT) ite((B0:INT)=ite(k3=k1, 3, ite(k2=k1, 2, ite(k1=k1, 1, "
@@ -227,7 +227,7 @@ TEST_CASE("expr.finite_map.get_after_mkSetVal") {
         "ite(k1=(B0:INT), 1, 0))))");
 
   Expr map = finite_map::mkEmptyMap(mkInt(0, efac)); // init map
-  map = finite_map::mkSetVal(map, lambda_keys, k1, mkInt(42, efac), efac);
+  map = finite_map::mkSetVal(map, lambda_keys, k1, mkInt(42, efac));
 
   CHECK(boost::lexical_cast<std::string>(map) ==
         "(lambda (INT) ite((B0:INT)=ite(k3=k1, 3, ite(k2=k1, 2, ite(k1=k1, 1, "
@@ -258,8 +258,8 @@ TEST_CASE("expr.finite_map.mkInitializedMap") {
   ExprVector values = {mkInt(41, efac), mkInt(42, efac), mkInt(43, efac)};
 
   Expr lmdKeys = finite_map::mkKeys(keys, efac);
-  Expr lmdValues = finite_map::mkInitializedMap(keys, sort::intTy(efac), values,
-                                                lmdKeys, efac);
+  Expr lmdValues = finite_map::mkInitializedMap(keys, sort::intTy(efac), values, values[0],
+                                                lmdKeys);
 
   Expr u_map =
       finite_map::constFiniteMap(keys, values[0], values); // uninterpreted map
