@@ -88,6 +88,7 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
   ExprFactory &efac = tdb.getExprFactory();
   ExprMap predDeclTransf;
 
+  Stats::start("FiniteMapTransfArgs");
   // Remove Finite Maps arguments
   for (auto &predIt : db.getRelations()) {
 
@@ -139,6 +140,9 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
   for (auto &q : db.getQueries())
     tdb.addQuery(q);
 
+  Stats::stop("FiniteMapTransfArgs");
+
+  Stats::start("FiniteMapTransfBody");
   // Remove Finite Maps from Bodies
   std::vector<HornRule> worklist;
   boost::copy(tdb.getRules(), std::back_inserter(worklist));
@@ -178,6 +182,7 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
       for (auto &cl
            : tdb.getRules()) cl.get()
           ->dump(););
+  Stats::stop("FiniteMapTransfBody");
 
   if (FmapSimplify) {
 
