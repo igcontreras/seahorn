@@ -21,6 +21,11 @@ static Expr mkVarGet(Expr mapConst, Expr k, Expr vTy) {
   return bind::mkConst(variant::variant(0, finite_map::get(mapConst, k)), vTy);
 }
 
+static inline Expr mkDefault(Expr base, Expr vTy) {
+  return bind::mkConst(
+      variant::tag(base, mkTerm<mpz_class>(0, vTy->efac())), vTy);
+}
+
 // \brief rewrites a map into separate scalar variables. New arguments are added
 // to `newArgs`, new unifications are added to `extra_unifs`
 template <typename Range>
@@ -43,8 +48,7 @@ void mkVarsMap(Expr map, const Range &keys, int nKs, Expr kTy, Expr vTy,
     *newArg_it++ = key;
     *newArg_it++ = v;
   }
-  Expr defaultV = bind::mkConst(
-      variant::tag(map_values.back(), mkTerm<mpz_class>(0, vTy->efac())), vTy);
+  Expr defaultV = mkDefault(map_values.back(),vTy);
   evars.insert(defaultV);
 
   extra_unifs.push_back(
@@ -204,7 +208,7 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
 
   auto keys = llvm::make_range(keysTy->args_begin(), keysTy->args_end());
 
-  Expr defaultV = bind::mkConst(variant::variant(0, mapConst), vTy);
+  Expr defaultV = mkDefault(mapConst,vTy);
   fmei.m_vars.insert(defaultV);
   Expr mapDef = finite_map::constFiniteMap(keys, defaultV);
   fmei.m_fmapVarTransf[mapConst] = mapDef;

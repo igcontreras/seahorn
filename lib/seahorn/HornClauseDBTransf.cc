@@ -85,6 +85,8 @@ void copy_if(Set &src, Set &dst, Predicate shouldCopy) {
 // -- tdb is an empty db that will contain db after transformation
 void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
 
+  ScopedStats _st_("HornFmaps");
+  
   ExprFactory &efac = tdb.getExprFactory();
   ExprMap predDeclTransf;
 
@@ -161,7 +163,6 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
       return !isOpX<FINITE_MAP_TY>(bind::rangeTy(bind::fname(expr)));
     });
 
-    errs() << "new rule\n";
     HornRule newRule(newVars, rule.head(), body);
 
     LOG(
