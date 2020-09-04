@@ -85,6 +85,7 @@ void copy_if(Set &src, Set &dst, Predicate shouldCopy) {
 // -- tdb is an empty db that will contain db after transformation
 void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 &zcontext) {
   ScopedStats _st_("HornFmaps");
+
   ExprFactory &efac = tdb.getExprFactory();
   ExprMap predDeclTransf;
 

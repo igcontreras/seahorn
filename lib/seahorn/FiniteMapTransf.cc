@@ -21,6 +21,11 @@ static Expr mkVarGet(Expr mapConst, Expr k, Expr vTy) {
   return bind::mkConst(variant::variant(0, finite_map::get(mapConst, k)), vTy);
 }
 
+static inline Expr mkDefault(Expr base, Expr vTy) {
+  return bind::mkConst(
+      variant::tag(base, mkTerm<mpz_class>(0, vTy->efac())), vTy);
+}
+
 // \brief rewrites a map into separate scalar variables. New arguments are added
 // to `newArgs`, new unifications are added to `extra_unifs`
 template <typename Range>
@@ -43,8 +48,7 @@ void mkVarsMap(Expr map, const Range &keys, int nKs, Expr kTy, Expr vTy,
     *newArg_it++ = key;
     *newArg_it++ = v;
   }
-  Expr defaultV = bind::mkConst(
-      variant::tag(map_values.back(), mkTerm<mpz_class>(0, vTy->efac())), vTy);
+  Expr defaultV = mkDefault(map_values.back(),vTy);
   evars.insert(defaultV);
 
   extra_unifs.push_back(
@@ -204,7 +208,7 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
 
   auto keys = llvm::make_range(keysTy->args_begin(), keysTy->args_end());
 
-  Expr defaultV = bind::mkConst(variant::variant(0, mapConst), vTy);
+  Expr defaultV = mkDefault(mapConst,vTy);
   fmei.m_vars.insert(defaultV);
   Expr mapDef = finite_map::constFiniteMap(keys, defaultV);
   fmei.m_fmapVarTransf[mapConst] = mapDef;
@@ -230,9 +234,10 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
     if (bind::isFiniteMapConst(mr)) { // if variable, use its expansion
       if (fmei.m_fmapVarTransf.count(mr) == 0) {
         // if no expansion is found, create a finite map with fresh consts
-        mr = mkEmptyConstMap(mr, fmei);
+        // Expr mrEmpty = mkEmptyConstMap(mr, fmei);
+	// errs() << "Expansion not found for " << *mr << "\n\t" << *mrEmpty << "\n";
+	mr = mkEmptyConstMap(mr, fmei);
         mrDefk = finite_map::fmapDefKeys(mr);
-        errs() << "Expansion not found " << *mr << "\n";
       } else {
         mr = fmei.m_fmapVarTransf[mr];
       }
@@ -377,9 +382,16 @@ static bool returnsFiniteMap(Expr e) {
          bind::isFiniteMapConst(e); // this check is done before rewriting
 }
 
+bool FiniteMapBodyVisitor::isRewriteFiniteMapOp(Expr e) {
+  return isOpX<CONST_FINITE_MAP>(e) || isOpX<GET>(e) || isOpX<SET>(e);
+  // we are not visiting CONST_FINITE_MAP_KEYS and DEFAULT
+}
+
+
 VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
 
-  if (isRewriteFiniteMapOp(exp))
+  // if (isRewriteFiniteMapOp(exp))
+  if(isOpX<CONST_FINITE_MAP>(exp) || isOpX<GET>(exp) || isOpX<SET>(exp))
     return VisitAction::changeDoKidsRewrite(exp, m_rw);
   else if (isOpX<EQ>(exp)) {
     if (returnsFiniteMap(exp->left()) || returnsFiniteMap(exp->right())) {
@@ -389,13 +401,9 @@ VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
     }
   } else if (bind::IsConst()(exp) || bind::isFdecl(exp))
     return VisitAction::skipKids();
-
+  
   return VisitAction::doKids();
 }
 
-bool FiniteMapBodyVisitor::isRewriteFiniteMapOp(Expr e) {
-  return isOpX<CONST_FINITE_MAP>(e) || isOpX<GET>(e) || isOpX<SET>(e);
-  // we are not visiting CONST_FINITE_MAP_KEYS and DEFAULT
-}
 
 } // namespace seahorn

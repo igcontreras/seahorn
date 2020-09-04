@@ -1789,9 +1789,9 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
                isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)))
     // +1 because fi.sumpPred->arg(0) is the function name
     {
-      // LOG("fmap-node",
-      //     assert(false &&
-      //            "Node not expected")); // uncomment for finding oversharing
+      LOG("fmap-node",
+          assert(false &&
+                 "Node not expected")); // uncomment to find oversharing
       // -- the memory region does not exist in the bu graph of the callee but
       // is still passed (as an array)
       assert(m_exprCell.count(param) > 0); // initialized when processing the
