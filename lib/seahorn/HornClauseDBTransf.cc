@@ -83,8 +83,8 @@ void copy_if(Set &src, Set &dst, Predicate shouldCopy) {
 }
 
 // -- tdb is an empty db that will contain db after transformation
-void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
-
+void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 &zcontext) {
+  ScopedStats _st_("HornFmaps");
   ExprFactory &efac = tdb.getExprFactory();
   ExprMap predDeclTransf;
 
@@ -114,13 +114,12 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
 
     Expr ruleE;
     if (isOpX<TRUE>(rule.body()))
-      // HACK for the transformation (force not simplifying implication)
+      // HACK for the transformation (forcing not simplifying implication)
       ruleE = mk<IMPL>(rule.body(), rule.head());
     else
       ruleE = rule.get();
 
     Expr newRuleE = visit(fmav, ruleE, dvc);
-
     HornRule newRule(allVars, newRuleE);
 
     LOG(
@@ -146,19 +145,20 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb) {
   // Remove Finite Maps from Bodies
   std::vector<HornRule> worklist;
   boost::copy(tdb.getRules(), std::back_inserter(worklist));
+  ZSimplifier<EZ3> zsimp(zcontext);
 
   for (auto rule : worklist) {
     ExprVector vars = rule.vars();
     ExprSet allVars(vars.begin(), vars.end());
 
     DagVisitCache dvc; // same for all the clauses?
-    FiniteMapBodyVisitor fmv(allVars, efac);
+    FiniteMapBodyVisitor fmv(allVars, efac, zsimp);
 
     Expr body = visit(fmv, rule.body(), dvc);
 
     ExprSet newVars;
     copy_if(allVars, newVars, [](Expr expr) { // not finite map
-      return !isOpX<FINITE_MAP_TY>(bind::rangeTy(bind::fname(expr)));
+      return !bind::isFiniteMapConst(expr);
     });
 
     HornRule newRule(newVars, rule.head(), body);

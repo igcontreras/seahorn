@@ -49,7 +49,7 @@ bool HornWrite::runOnModule(Module &M) {
   HornClauseDB tdb(origdb.getExprFactory());
 
   if (InterProcMemFmaps) { // rewrite finite maps
-    removeFiniteMapsHornClausesTransf(origdb, tdb);
+    removeFiniteMapsHornClausesTransf(origdb, tdb, hm.getZContext());
   }
 
   HornClauseDB &db = InterProcMemFmaps ? tdb : origdb;

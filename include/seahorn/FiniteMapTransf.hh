@@ -28,11 +28,13 @@ struct FMapExprsInfo {
 
   ExprMap &m_fmapVarTransf;
   ExprFactory &m_efac;
+  ZSimplifier<EZ3> &m_zsimp;
 
   FMapExprsInfo(ExprSet &vars, ExprMap &types, ExprMap &type_lmds,
-                ExprMap &fmapDefk, ExprMap &fmapVarTransf, ExprFactory &efac)
+                ExprMap &fmapDefk, ExprMap &fmapVarTransf, ExprFactory &efac,
+                ZSimplifier<EZ3> &zsimp)
       : m_vars(vars), m_type(types), m_typeLmd(type_lmds), m_fmapDefk(fmapDefk),
-        m_fmapVarTransf(fmapVarTransf), m_efac(efac) {}
+        m_fmapVarTransf(fmapVarTransf), m_efac(efac), m_zsimp(zsimp) {}
 };
 
 class FiniteMapArgRewriter : public std::unary_function<Expr, Expr> {
@@ -75,11 +77,12 @@ class FiniteMapBodyRewriter : public std::unary_function<Expr, Expr> {
 
   FMapExprsInfo m_fmei;
 
-public:
+public :
   FiniteMapBodyRewriter(ExprSet &evars, ExprMap &expr_type,
                         ExprMap &type_lambda, ExprMap &fmapDef,
-                        ExprMap &fmapVarDef, ExprFactory &efac)
-      : m_fmei(evars, expr_type, type_lambda, fmapDef, fmapVarDef, efac){};
+                        ExprMap &fmapVarDef, ExprFactory &efac,
+                        ZSimplifier<EZ3> &zsimp)
+      : m_fmei(evars, expr_type, type_lambda, fmapDef, fmapVarDef, efac, zsimp){};
 
   Expr operator()(Expr exp);
 };
@@ -95,9 +98,9 @@ private:
   std::shared_ptr<FiniteMapBodyRewriter> m_rw;
 
 public:
-  FiniteMapBodyVisitor(ExprSet &evars, ExprFactory &efac) {
+  FiniteMapBodyVisitor(ExprSet &evars, ExprFactory &efac, ZSimplifier<EZ3> &zsimp) {
     m_rw = std::make_shared<FiniteMapBodyRewriter>(evars, m_types, m_map_lambda,
-                                               m_fmapDef, m_fmapVarDef, efac);
+                                                   m_fmapDef, m_fmapVarDef, efac, zsimp);
   }
 
   VisitAction operator()(Expr exp);

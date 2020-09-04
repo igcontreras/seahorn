@@ -278,10 +278,10 @@ inline Expr mkGetVal(Expr lmdMap, Expr lmdKeys, Expr key) {
 inline Expr mkSetVal(Expr lmdMap, Expr lmdKeys, Expr key, Expr value) {
   ExprFactory &efac = lmdMap->efac();
 
-  // assert(isOpX<LAMBDA>(lmdMap));
   // lmdMap may be a lambda or the default value: a number or a const.
   assert(isOpX<LAMBDA>(lmdKeys));
   assert(isOpX<FDECL>(lmdKeys->arg(0)));
+
   Expr kTy = bind::rangeTy(lmdKeys->arg(0));
   Expr x = bind::mkConst(mkTerm<std::string>("x", efac), kTy);
   // this internal variable needs to be of the same sort as keys

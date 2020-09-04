@@ -2,6 +2,7 @@
 #pragma once
 
 #include "seahorn/HornClauseDB.hh"
+#include "seahorn/Expr/Smt/EZ3.hh"
 
 namespace seahorn {
 
@@ -10,6 +11,6 @@ void normalizeHornClauseHeads(HornClauseDB &db);
 
 // Rewrites the Horn Clauses to remove Finite Map terms (new relations are
 // created for the relations that contain Finite Maps as arguments)
-void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb);
+void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 & zcontext);
 
 } // namespace seahorn
