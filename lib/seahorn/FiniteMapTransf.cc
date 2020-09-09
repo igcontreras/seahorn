@@ -178,23 +178,23 @@ static Expr mkFMapPrimitiveArgCore(Expr map, FMapExprsInfo &fmei) {
     } else {
       Expr defk = finite_map::fmapDefKeys(map);
       Expr valuesE = finite_map::fmapDefValues(map);
-      return fmei.m_zsimp.simplify(finite_map::mkInitializedMap(
+      return finite_map::mkInitializedMap(
           llvm::make_range(defk->args_begin(), defk->args_end()), vTy,
           llvm::make_range(valuesE->args_begin(), valuesE->args_end()),
-          finite_map::fmapDefDefault(map)->first(), lmdKeys));
+          finite_map::fmapDefDefault(map)->first(), lmdKeys);
     }
   } else // already transformed map: default-map or ite expr
     return map;
 }
 
-static Expr getValueAtDef(Expr map, Expr lks, Expr k, unsigned pos) {
+static Expr getValueAtDef(Expr map, Expr lks, Expr k, unsigned pos, ZSimplifier<EZ3> &zsimp) {
   if (isOpX<CONST_FINITE_MAP>(map)) {
     if (finite_map::isInitializedFiniteMap(map))
       return finite_map::fmapDefValues(map)->arg(pos);
     else
       return finite_map::fmapDefDefault(map)->left();
   } else // already an expanded map term
-    return finite_map::mkGetVal(map, lks, k);
+    return zsimp.simplify(finite_map::mkGetValPos(map, mkTerm<mpz_class>(pos, map->efac())));
 }
 
 static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
@@ -214,7 +214,7 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
   fmei.m_fmapVarTransf[mapConst] = mapDef;
   fmei.m_type[mapConst] = mapTy;
   fmei.m_type[mapDef] = mapTy;
-  Expr mapLmdKeys = fmei.m_zsimp.simplify(finite_map::mkKeys(keys, fmei.m_efac));
+  Expr mapLmdKeys = finite_map::mkKeys(keys, fmei.m_efac);
   fmei.m_typeLmd[mapConst] = mapLmdKeys;
   fmei.m_typeLmd[mapDef] = mapLmdKeys;
   fmei.m_fmapDefk[mapConst] = finite_map::fmapDefKeys(mapDef);
@@ -287,8 +287,8 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
     assert(r_it != mrDefk->args_end());
     *conj_it++ = mk<EQ>(*l_it, *r_it);
     // unify values
-    *conj_it++ = mk<EQ>(getValueAtDef(ml, lksl, mlDefk->arg(i), i),
-                        getValueAtDef(mr, lksr, mrDefk->arg(i), i));
+    *conj_it++ = mk<EQ>(getValueAtDef(ml, lksl, mlDefk->arg(i), i, fmei.m_zsimp),
+                        getValueAtDef(mr, lksr, mrDefk->arg(i), i, fmei.m_zsimp));
   }
   return boolop::land(conj);
 }
@@ -306,7 +306,7 @@ static Expr mkDefFMapCore(Expr map, FMapExprsInfo &fmei) {
 
   auto keys = llvm::make_range(defk->args_begin(), defk->args_end());
   fmei.m_type[map] = sort::finiteMapTy(vTy, keys);
-  fmei.m_typeLmd[map] = fmei.m_zsimp.simplify(finite_map::mkKeys(keys, fmei.m_efac));
+  fmei.m_typeLmd[map] = finite_map::mkKeys(keys, fmei.m_efac);
 
   return map;
 }
@@ -320,8 +320,10 @@ static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
     assert(bind::isFiniteMapConst(map));
     mkEmptyConstMap(map, fmei);
   }
-  return fmei.m_zsimp.simplify(finite_map::mkGetVal(mkFMapPrimitiveArgCore(map, fmei),
-                                                    fmei.m_typeLmd[map], key));
+  Expr pos = fmei.m_zsimp.simplify(finite_map::mkGetPosKey(fmei.m_typeLmd[map], key));
+  // try if pos is a number, simplify, return as it is otherwise
+  return fmei.m_zsimp.simplify(op::bind::betaReduce(mkFMapPrimitiveArgCore(map, fmei), pos));
+
 }
 
 // -- rewrites a map set primitive

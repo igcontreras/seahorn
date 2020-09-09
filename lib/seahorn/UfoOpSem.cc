@@ -1672,7 +1672,7 @@ Expr FMapUfoOpSem::symb(const Value &V) {
 
             for (int i = 0; i < nKs; i++, ks_it++)
               *ks_it = bind::intConst(
-                  variant::variant(i, variant::tag(v, m_keyBase)));
+				      variant::variant(i, variant::tag(v, m_keyBase)));
 
             Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
             LOG("fmap_symb", errs() << *v << ": "
