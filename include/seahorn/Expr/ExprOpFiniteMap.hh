@@ -231,6 +231,22 @@ inline Expr mkKeys(const Range &keys, ExprFactory &efac) {
   return bind::abs<LAMBDA>(std::array<Expr, 1>{keyToPos}, lmdTmp);
 }
 
+// creates a set of keys as a lambda function
+template <typename Range>
+inline Expr mkKeys(const Range &keys, const Expr base, const Expr kTy, ExprFactory &efac) {
+
+  Expr lmdTmp = mkTerm<mpz_class>(0, efac);
+  // default value for th lambda keys: a key not defined in the fmap
+
+  Expr keyToPos = bind::intConst(mkTerm<std::string>("x", efac));
+  unsigned count = 1;
+  for (auto key : keys)
+    lmdTmp = boolop::lite(mk<EQ>(bind::mkConst(variant::tag(base, key), kTy), keyToPos), mkTerm<mpz_class>(count++, efac),
+                          lmdTmp);
+
+  return bind::abs<LAMBDA>(std::array<Expr, 1>{keyToPos}, lmdTmp);
+}
+
 // \brief creates a map for keys and values, assuming that they are sorted
 template <typename Range>
 inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
@@ -269,6 +285,20 @@ inline Expr mkGetVal(Expr lmdMap, Expr lmdKeys, Expr key) {
   assert(isOpX<LAMBDA>(lmdKeys));
 
   return op::bind::betaReduce(lmdMap, op::bind::betaReduce(lmdKeys, key));
+}
+
+inline Expr mkGetPosKey(Expr lmdKeys, Expr key) {
+
+  assert(isOpX<LAMBDA>(lmdKeys));
+  return op::bind::fapp(lmdKeys, key);
+}
+
+// \brief operation for extracting the value when the possition is
+// already know, i.e., the keys lambda term has been resolved
+inline Expr mkGetValPos(Expr lmdMap, Expr pos) {
+
+  //return op::bind::betaReduce(lmdMap, pos);
+  return op::bind::fapp(lmdMap, pos);
 }
 
 /// \brief Constructs set expression. Non-simplifying. None of the parameters
