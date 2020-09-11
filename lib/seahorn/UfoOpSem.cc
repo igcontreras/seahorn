@@ -1579,7 +1579,7 @@ void MemUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
     Function *f_callee = ci->getCalledFunction();
     if (f_callee == nullptr)
       break;
-
+    
     if (f_callee->getName().equals("shadow.mem.arg.ref"))
       addCIArraySymbol(ci, csi.m_fparams[i], MemOpt::IN);
     else if (f_callee->getName().equals("shadow.mem.arg.mod")) {
@@ -1665,6 +1665,8 @@ Expr FMapUfoOpSem::symb(const Value &V) {
               m_preproc->getNumAccesses(&n, F); // this should be by cell
 
           if (nKs > 0) {
+	    NodeSet &safeNodes = m_preproc->getUnsafeNodes(F);
+	    assert(m_preproc->isSafeNode(safeNodes,&n));
             Expr v = mkTerm<const Value *>(&V, m_efac); // same name as array
                                                         // but different sort
             ExprVector keys(nKs);
@@ -1767,9 +1769,12 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   if (fi.ret) {
     Expr retE = s.havoc(symb(*csi.m_cs.getInstruction()));
     csi.m_fparams.push_back(retE);
-    if (calleeG.hasCell(*fi.ret))
-      VCgenArg(calleeG.getCell(*fi.ret), retE, unsafeNodesCaller, simMap,
-               *calleeF);
+    if (calleeG.hasCell(*fi.ret)) {
+      const Cell &c = calleeG.getCell(*fi.ret); // no
+      if(hasOrigArraySymbol(simMap.get(c), MemOpt::OUT))
+	VCgenArg(c, retE, unsafeNodesCaller, simMap,
+		 *calleeF);
+    }
   }
 
   for (int i = 3; i < csi.m_fparams.size(); i++) {
@@ -2035,7 +2040,9 @@ void FMapUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
       break;
 
     Function *f_callee = ci->getCalledFunction();
-    if (f_callee->getName().equals("shadow.mem.arg.ref"))
+    if (f_callee == nullptr)
+      break;
+    else if (f_callee->getName().equals("shadow.mem.arg.ref"))
       addCIArraySymbol(ci, csi.m_fparams[i], MemOpt::IN);
     else if (f_callee->getName().equals("shadow.mem.arg.mod")) {
       addCIArraySymbol(ci, csi.m_fparams[i], MemOpt::OUT);

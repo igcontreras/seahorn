@@ -35,9 +35,9 @@ struct ExplorationInfo {
 static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
                                     ExplorationInfo &ei) {
 
-  if (isSafeNode(ei.m_calleeUnsafe, &n))
+  // if (isSafeNode(ei.m_calleeUnsafe, &n))
     ei.m_calleeUnsafe.insert(&n); // store the ones that are not safe
-  if (isSafeNode(ei.m_callerUnsafe, &nCaller))
+  // if (isSafeNode(ei.m_callerUnsafe, &nCaller))
     ei.m_callerUnsafe.insert(&nCaller);
 
   ei.m_explColor[&n] = EColor::BLACK;
@@ -58,34 +58,43 @@ static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
 }
 
 // -- returns true if the nodes are unsafe
-static bool exploreNode(const Node &nCallee, const Node &nCaller,
-                        ExplorationInfo &ei) {
-  ei.m_explColor[&nCallee] = EColor::GRAY;
+static void exploreNode(const Node &nCallee, const Node &nCaller,
+			ExplorationInfo &ei) {
+
+  assert(ei.m_explColor.count(&nCallee) == 0);
 
   if (isUnboundedMem(&nCallee, &nCaller)) {
     propagateUnsafeChildren(nCallee, nCaller, ei);
-    return true;
+    return;
+
   } else {
+    ei.m_explColor[&nCallee] = EColor::GRAY;
+
     for (auto &links : nCallee.getLinks()) {
       const Cell &nextC = *links.second;
       const Cell &nextCaller = ei.m_sm.get(nextC);
       const Node *nextN = nextC.getNode();
-      if (ei.m_explColor.count(nextN) == 0 &&
-          exploreNode(*nextN, *nextCaller.getNode(), ei))
-        return true;
-      else if (ei.m_explColor.count(nextN) > 0 &&
-               ei.m_explColor[nextN] == EColor::GRAY) {
-        propagateUnsafeChildren(nCallee, nCaller, ei);
-        return true;
-      }
+      if (ei.m_explColor.count(nextN) == 0) // not explored
+	exploreNode(*nextN, *nextCaller.getNode(), ei);
+      else if (ei.m_explColor.count(nextN) > 0 && // being explored
+	       ei.m_explColor[nextN] == EColor::GRAY)
+	propagateUnsafeChildren(nCallee, nCaller, ei);
+      // else, it has been explored already
     }
+    ei.m_explColor[&nCallee] = EColor::BLACK;
   }
-  ei.m_explColor[&nCallee] = EColor::BLACK;
-
-  return false;
 }
 
-static void computeUnsafeNodesSimulation(Graph &fromG, const Function &F,
+// -- returns true if the nodes are unsafe
+static void checkExploreNode(const Node &nCallee, const Node &nCaller,
+                        ExplorationInfo &ei) {
+  if (ei.m_explColor.count(&nCallee) > 0)
+    return;
+
+  exploreNode(nCallee, nCaller, ei);
+}
+
+static void computeSafeNodesSimulation(Graph &fromG, const Function &F,
                                          NodeSet &fromSafe,
                                          NodeSet &toSafe,
                                          SimulationMapper &sm) {
@@ -98,28 +107,30 @@ static void computeUnsafeNodesSimulation(Graph &fromG, const Function &F,
       const Cell &c = fromG.getCell(a);
       const Node *n = c.getNode();
       const Cell &cCaller = sm.get(c);
-      exploreNode(*n, *cCaller.getNode(), ei);
+      checkExploreNode(*n, *cCaller.getNode(), ei);
     }
   }
 
   // globals
   for (auto &kv : fromG.globals()) {
     Cell &c = *kv.second;
-    exploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
+    checkExploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
   }
 
   // return cell
   if (fromG.hasRetCell(F)) {
     Cell &c = fromG.getRetCell(F);
-    exploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
+    checkExploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
   }
 
   // ei.m_explColor has the nodes explored
   for( auto kv : ei.m_explColor){
     const Node * n = kv.first;
-    if(fromUnsafe.count(n) == 0){
+    Node *n_caller = sm.get(*n).getNode();
+    if(toUnsafe.count(n_caller) == 0){
+      assert(!isUnboundedMem(n, n_caller));
       fromSafe.insert(n);
-      toSafe.insert(sm.get(*n).getNode());
+      toSafe.insert(n_caller);
     }
   }
 }
@@ -167,10 +178,10 @@ bool InterMemPreProc::runOnModule(Module &M) {
             dsaCS, *(const_cast<Graph *>(&calleeG)),
             *(const_cast<Graph *>(&callerG)), simMap);
 
-        NodeSet &unsafeCallee = getUnsafeNodesCalleeCS(I); // creates it
-        NodeSet &unsafeCaller = getUnsafeNodesCallerCS(I); // creates it
-        computeUnsafeNodesSimulation(*(const_cast<Graph *>(&calleeG)),
-                                     *f_callee, unsafeCallee, unsafeCaller,
+        NodeSet &safeCallee = getUnsafeNodesCalleeCS(I); // creates it
+        NodeSet &safeCaller = getUnsafeNodesCallerCS(I); // creates it
+        computeSafeNodesSimulation(*(const_cast<Graph *>(&calleeG)),
+                                     *f_callee, safeCallee, safeCaller,
                                      simMap);
 
       }
@@ -221,10 +232,10 @@ void InterMemPreProc::runOnFunction(const Function *F) {
       *(const_cast<Graph *>(&buG)), *(const_cast<Graph *>(&sasG)), simMap);
   assert(simulated && "Summary graph could not be simulated with SAS graph");
 
-  NodeSet &unsafeSAS = m_unsafeNF[F];
-  NodeSet unsafeBU; // won't be used later
-  computeUnsafeNodesSimulation(*(const_cast<Graph *>(&buG)), *F, unsafeBU,
-                               unsafeSAS, simMap);
+  NodeSet &safeSAS = m_unsafeNF[F];
+  NodeSet safeBU; // won't be used later
+  computeSafeNodesSimulation(*(const_cast<Graph *>(&buG)), *F, safeBU,
+                               safeSAS, simMap);
 
   // -- compute number of accesses to safe nodes
   NodeSet explored; // track exploration, needs to be emptied for every starting
@@ -234,18 +245,18 @@ void InterMemPreProc::runOnFunction(const Function *F) {
   for (const Argument &a : F->args())
     if (buG.hasCell(a)) {
       explored.clear();
-      recProcessNode(buG.getCell(a), unsafeSAS, simMap, explored, rm);
+      recProcessNode(buG.getCell(a), safeSAS, simMap, explored, rm);
     }
 
   for (auto &kv : buG.globals()) {
     Cell &c = *kv.second;
     explored.clear();
-    recProcessNode(c, unsafeSAS, simMap, explored, rm);
+    recProcessNode(c, safeSAS, simMap, explored, rm);
   }
 
   if (buG.hasRetCell(*F)) {
     explored.clear();
-    recProcessNode(buG.getRetCell(*F), unsafeSAS, simMap, explored, rm);
+    recProcessNode(buG.getRetCell(*F), safeSAS, simMap, explored, rm);
   }
 }
 
@@ -259,7 +270,7 @@ unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
 }
 
 // -- processes the nodes in a graph to obtain the number accesses to different offsets
-void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
+void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &toSafeNodes,
                                      SimulationMapper &simMap,
                                      NodeSet &explored, RegionsMap &rm) {
 
@@ -273,7 +284,7 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
   const Cell &cTo = simMap.get(cFrom);
   const Node *nTo = cTo.getNode();
 
-  if (isSafeNode(unsafeNodes, nTo) && !cFrom.getNode()->types().empty())
+  if (InterMemPreProc::isSafeNode(toSafeNodes, nTo) && !cFrom.getNode()->types().empty())
     rm[nTo] = rm[nTo] + cFrom.getNode()->types().size();
 
   if (nFrom->getLinks().empty())
@@ -285,7 +296,7 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
     const Node *nextN = nextC.getNode();
 
     if (explored.find(nextN) == explored.end()) // not explored yet
-      recProcessNode(nextC, unsafeNodes, simMap, explored, rm);
+      recProcessNode(nextC, toSafeNodes, simMap, explored, rm);
   }
 }
 
