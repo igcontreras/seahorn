@@ -1579,7 +1579,7 @@ void MemUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
     Function *f_callee = ci->getCalledFunction();
     if (f_callee == nullptr)
       break;
-    
+
     if (f_callee->getName().equals("shadow.mem.arg.ref"))
       addCIArraySymbol(ci, csi.m_fparams[i], MemOpt::IN);
     else if (f_callee->getName().equals("shadow.mem.arg.mod")) {
@@ -1665,8 +1665,8 @@ Expr FMapUfoOpSem::symb(const Value &V) {
               m_preproc->getNumAccesses(&n, F); // this should be by cell
 
           if (nKs > 0) {
-	    NodeSet &safeNodes = m_preproc->getUnsafeNodes(F);
-	    assert(m_preproc->isSafeNode(safeNodes,&n));
+            NodeSet &safeNodes = m_preproc->getUnsafeNodes(F);
+            assert(m_preproc->isSafeNode(safeNodes, &n));
             Expr v = mkTerm<const Value *>(&V, m_efac); // same name as array
                                                         // but different sort
             ExprVector keys(nKs);
@@ -1674,7 +1674,7 @@ Expr FMapUfoOpSem::symb(const Value &V) {
 
             for (int i = 0; i < nKs; i++, ks_it++)
               *ks_it = bind::intConst(
-				      variant::variant(i, variant::tag(v, m_keyBase)));
+                  variant::variant(i, variant::tag(v, m_keyBase)));
 
             Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
             LOG("fmap_symb", errs() << *v << ": "
@@ -1771,9 +1771,8 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     csi.m_fparams.push_back(retE);
     if (calleeG.hasCell(*fi.ret)) {
       const Cell &c = calleeG.getCell(*fi.ret); // no
-      if(hasOrigArraySymbol(simMap.get(c), MemOpt::OUT))
-	VCgenArg(c, retE, unsafeNodesCaller, simMap,
-		 *calleeF);
+      if (hasOrigArraySymbol(simMap.get(c), MemOpt::OUT))
+        VCgenArg(c, retE, unsafeNodesCaller, simMap, *calleeF);
     }
   }
 
