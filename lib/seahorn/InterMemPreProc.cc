@@ -235,26 +235,17 @@ void InterMemPreProc::runOnFunction(const Function *F) {
                              simMap);
 
   // -- compute number of accesses to safe nodes
-  NodeSet explored; // track exploration, needs to be emptied for every starting
-                    // cell
   RegionsMap &rm = m_frm[F];
 
   for (const Argument &a : F->args())
-    if (buG.hasCell(a)) {
-      explored.clear();
-      recProcessNode(buG.getCell(a), safeSAS, simMap, explored, rm);
-    }
+    if (buG.hasCell(a))
+      recProcessNode(buG.getCell(a), safeSAS, simMap, rm);
 
-  for (auto &kv : buG.globals()) {
-    Cell &c = *kv.second;
-    explored.clear();
-    recProcessNode(c, safeSAS, simMap, explored, rm);
-  }
+  for (auto &kv : buG.globals())
+    recProcessNode(*kv.second, safeSAS, simMap, rm);
 
-  if (buG.hasRetCell(*F)) {
-    explored.clear();
-    recProcessNode(buG.getRetCell(*F), safeSAS, simMap, explored, rm);
-  }
+  if (buG.hasRetCell(*F))
+    recProcessNode(buG.getRetCell(*F), safeSAS, simMap, rm);
 }
 
 unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
@@ -268,12 +259,11 @@ unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
 
 // -- processes the nodes in a graph to obtain the number accesses to different
 // offsets
+// -- cycles cannot happen because those nodes would be marked as unsafe
 void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &toSafeNodes,
-                                     SimulationMapper &simMap,
-                                     NodeSet &explored, RegionsMap &rm) {
+                                     SimulationMapper &simMap, RegionsMap &rm) {
 
   const Node *nFrom = cFrom.getNode();
-  explored.insert(nFrom);
 
   if (nFrom->size() == 0)
     // the node is not accessed in this graph
@@ -282,21 +272,15 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &toSafeNodes,
   const Cell &cTo = simMap.get(cFrom);
   const Node *nTo = cTo.getNode();
 
-  if (InterMemPreProc::isSafeNode(toSafeNodes, nTo) &&
-      !cFrom.getNode()->types().empty())
-    rm[nTo] = rm[nTo] + cFrom.getNode()->types().size();
-
-  if (nFrom->getLinks().empty())
+  if (!isSafeNode(toSafeNodes, nTo))
     return;
 
-  // follow the pointers of the node
-  for (auto &links : nFrom->getLinks()) {
-    const Cell &nextC = *links.second;
-    const Node *nextN = nextC.getNode();
+  rm[nTo] = rm[nTo] + cFrom.getNode()->types().size();
 
-    if (explored.find(nextN) == explored.end()) // not explored yet
-      recProcessNode(nextC, toSafeNodes, simMap, explored, rm);
-  }
+  // follow the pointers of the node
+  for (auto &links : nFrom->getLinks())
+    recProcessNode(*links.second, toSafeNodes, simMap, rm);
+
 }
 
 } // namespace seahorn

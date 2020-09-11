@@ -65,7 +65,9 @@ public:
     return m_smF[f];
   }
 
-  bool hasSimulationCS(const CallSite &cs) { m_smCS.count(cs.getInstruction()) > 0; }
+  bool hasSimulationCS(const CallSite &cs) {
+    m_smCS.count(cs.getInstruction()) > 0;
+  }
   seadsa::SimulationMapper &getSimulationCS(const CallSite &cs) {
     return m_smCS[cs.getInstruction()];
   }
@@ -78,9 +80,9 @@ public:
   }
 
   unsigned getNumCIAccessesCellSummary(const Cell &c, const Function *f);
-  private:
-    void recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
-                        SimulationMapper &simMap, NodeSet &explored,
-                        RegionsMap &rm);
-  };
+
+private:
+  void recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
+                      SimulationMapper &simMap, RegionsMap &rm);
+};
 } // namespace seahorn
