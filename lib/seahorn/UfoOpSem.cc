@@ -1498,8 +1498,8 @@ void MemUfoOpSem::recVCGenMem(const Cell &c_callee, Expr ptr,
 
       Cell c_callee_field(c_callee, offset);
       Cell c_caller_field = simMap.get(c_callee_field);
-      if (!isMemScalar(c_caller_field)) // if the field is represented with a
-                                        // scalar, skip the copy
+      if (isMemScalar(c_caller_field)) // if the field is represented with a
+                 // scalar, skip the copy
         continue;
 
       // create a new name for that array if it was not created
@@ -1547,6 +1547,7 @@ void MemUfoOpSem::recVCGenMem(const Cell &c_callee, Expr ptr,
 
 // TODO: this is a generic version, in this semantics checking finite
 // maps is not necessary, specialize in FMapUfoOpSem?
+// -- returns true of the cell is encoded with a scalar
 bool MemUfoOpSem::isMemScalar(const Cell &c) {
 
   Expr memE;
@@ -1559,11 +1560,11 @@ bool MemUfoOpSem::isMemScalar(const Cell &c) {
     return false;
   }
 
-  return bind::isArrayConst(memE) || bind::isFiniteMapConst(memE);
+  return !(bind::isArrayConst(memE) || bind::isFiniteMapConst(memE));
 }
 
-// -- stores the name(s) of the array(s) that represents every cell involved in
-// the CallSite
+// -- stores the name(s) of the array(s) that represents every cell involved
+// in the CallSite
 void MemUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
 
   unsigned i = csi.m_fparams.size() - 1;
@@ -1890,8 +1891,11 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
 
       Cell c_callee_field(c_callee, offset);
       Cell c_caller_field = simMap.get(c_callee_field);
-      if (!isMemScalar(c_caller_field)) // if the field is represented with a
-                                        // scalar, skip the copy
+
+      // -- if the field is represented with a
+      // scalar, or it has 0 accesses skip the copy
+      if (isMemScalar(c_caller_field) ||
+          m_preproc->getNumCIAccessesCellSummary(c_callee_field, &F) == 0)
         continue;
 
       if (hasOrigArraySymbol(c_caller_field, MemOpt::IN)) {
@@ -1960,9 +1964,9 @@ Expr FMapUfoOpSem::memSetValue(Expr mem, Expr offset, Expr v) {
   }
 }
 
-// \brief if a cell is read in an offset, we store the offset's key and value to
-// be included later in the definition of the new finite map (with is the same
-// as copying them).
+// \brief if a cell is read in an offset, we store the offset's key and value
+// to be included later in the definition of the new finite map (with is the
+// same as copying them).
 void FMapUfoOpSem::addKeyVal(Cell c, Expr basePtr, Expr offset, MemOpt ao) {
   Expr orig = getOrigMemSymbol(c, ao);
   Expr dir = mk<PLUS>(basePtr, offset);
@@ -1970,9 +1974,9 @@ void FMapUfoOpSem::addKeyVal(Cell c, Expr basePtr, Expr offset, MemOpt ao) {
   getExprValues(orig).push_back(memObtainValue(orig, dir));
 }
 
-// \brief if a cell is written in an offset, we need to create a new finite map
-// variable for it, store the offset's key and value, and copy the value back to
-// the original mem symbol in the caller (`m_fmOut`).
+// \brief if a cell is written in an offset, we need to create a new finite
+// map variable for it, store the offset's key and value, and copy the value
+// back to the original mem symbol in the caller (`m_fmOut`).
 void FMapUfoOpSem::storeVal(Cell c, Expr readFrom, Expr basePtr, Expr offset) {
 
   Expr out = getOrigMemSymbol(c, MemOpt::OUT);
