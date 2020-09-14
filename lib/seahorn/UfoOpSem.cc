@@ -1643,16 +1643,16 @@ void InterMemStats::copyTo(InterMemStats &ims) {
 
 // TODO: Move to FMapUfoOpSem.cc?
 
-Expr FMapUfoOpSem::symb(const Value &V) {
+Expr FMapUfoOpSem::symb(const Value &I) {
 
   const Value *scalar = nullptr;
 
-  if (isShadowMem(V, &scalar)) {
+  if (isShadowMem(I, &scalar)) {
     if (!scalar) {
-      if (const Instruction *i = dyn_cast<const Instruction>(&V)) {
+      if (const Instruction *i = dyn_cast<const Instruction>(&I)) {
         const Function *F = i->getParent()->getParent();
 
-        if (const CallInst *CI = dyn_cast<const CallInst>(&V)) {
+        if (const CallInst *CI = dyn_cast<const CallInst>(&I)) {
           LOG("fmap_symb",
               errs() << "Variable of: " << F->getGlobalIdentifier() << "\n";
               errs() << "Instruction: " << *i << "\n");
@@ -1667,7 +1667,7 @@ Expr FMapUfoOpSem::symb(const Value &V) {
           if (nKs > 0) {
             NodeSet &safeNodes = m_preproc->getUnsafeNodes(F);
             assert(m_preproc->isSafeNode(safeNodes, &n));
-            Expr v = mkTerm<const Value *>(&V, m_efac); // same name as array
+            Expr v = mkTerm<const Value *>(&I, m_efac); // same name as array
                                                         // but different sort
             ExprVector keys(nKs);
             auto ks_it = keys.begin();
@@ -1684,16 +1684,16 @@ Expr FMapUfoOpSem::symb(const Value &V) {
 
             return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
           }
-        } else if (const PHINode *PI = dyn_cast<const PHINode>(&V)) {
+        } else if (const PHINode *PI = dyn_cast<const PHINode>(&I)) {
           Value *vPI = PI->getIncomingValue(0);
           Expr incomingConst = symb(*vPI);
-          return bind::mkConst(mkTerm<const Value *>(vPI, m_efac),
+          return bind::mkConst(mkTerm<const Value *>(&I, m_efac),
                                bind::rangeTy(bind::name(incomingConst)));
         }
       }
     }
   }
-  return UfoOpSem::symb(V);
+  return UfoOpSem::symb(I);
 }
 
 static bool checkArgs(Expr fapp) {
