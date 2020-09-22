@@ -155,6 +155,7 @@ bool HornSolver::runOnModule(Module &M) {
   params.set(":spacer.ground_pobs", false);
   params.set(":spacer.use_euf_gen", UseEufGen);
   params.set(":spacer.max_level", HornMaxDepth);
+  // params.set(":spacer.blast_term_ite_inflation", 0U);
   fp.set(params);
 
   db.loadZFixedPoint(fp, SkipConstraints);

@@ -76,7 +76,10 @@ public:
 
   unsigned getNumAccesses(const Node *n, const Function *f) {
     assert(m_frm.count(f) > 0);
-    return m_frm[f][n];
+    if (m_frm[f].count(n) == 0)
+      return 0;
+    else
+      return m_frm[f][n];
   }
 
   unsigned getNumCIAccessesCellSummary(const Cell &c, const Function *f);

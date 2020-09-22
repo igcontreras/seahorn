@@ -50,9 +50,6 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
   Expr boolSort = sort::boolTy(m_efac);
   ExprVector sorts{boolSort, boolSort, boolSort};
 
-  // if (m_interprocFmaps) // precompute finite memory regions
-  //   m_parent.getInterMemPP().preprocFunction(&F);
-
   // memory regions
   for (const Instruction &inst : BB) {
     if (const CallInst *ci = dyn_cast<const CallInst>(&inst)) {

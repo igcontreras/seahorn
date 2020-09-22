@@ -754,7 +754,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
 
       if (F.getName().equals("shadow.mem.init")) {
         Expr mem = m_s.havoc(symb(I));
-        m_sem.execMemInit(CS, mem, m_side, m_s);
+        // m_sem.execMemInit(CS, mem, m_side, m_s);
       } else if (F.getName().equals("shadow.mem.load")) {
         const Value &v = *CS.getArgument(1);
         m_inMem = m_s.read(symb(v));
@@ -765,7 +765,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         m_uniq = extractUniqueScalar(CS) != nullptr;
       } else if (F.getName().equals("shadow.mem.global.init")) {
         m_inMem = m_s.read(symb(*CS.getArgument(1)));
-        m_sem.execMemInit(CS, m_inMem, m_side, m_s); // TODO: review
+        // m_sem.execMemInit(CS, m_inMem, m_side, m_s); // TODO: review
         m_outMem = m_s.havoc(symb(I));
         m_side.push_back(mk<EQ>(m_outMem, m_inMem));
       } else if (F.getName().equals("shadow.mem.arg.ref"))
@@ -790,7 +790,12 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         // regions initialized in main are global. We want them to
         // flow to the arguments
         /* do nothing */
-      }
+      } // else if (PF.getName().equals("main") &&
+      //            F.getName().equals("shadow.mem.arg.init")) {
+      //   // initialize the keys of the regions in the main function
+      //   m_inMem = m_s.read(symb(*CS.getArgument(1)));
+      //   m_sem.execMemInit(CS, m_inMem, m_side, m_s);
+      // }
     } else {
       if (m_fparams.size() > 3) {
 
@@ -1302,15 +1307,12 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     Expr argE = s.read(symb(*gv));
     csi.m_fparams.push_back(argE);
     const Cell &c = calleeG.getCell(*gv);
-    if (!EnableUniqueScalars || hasOrigArraySymbol(c, MemOpt::IN)) {
-      Expr memE = getOrigMemSymbol(c, MemOpt::IN);
-      if (bind::isArrayConst(memE)) {
-        unsigned init_fields = g_im_stats.m_fields_copied;
-        VCgenArg(calleeG.getCell(*gv), argE, unsafeNodesCaller, simMap, side);
-        LOG("inter_mem_counters", g_im_stats.m_n_gv++;
-            if (init_fields < g_im_stats.m_fields_copied)
-                g_im_stats.m_gv_copied++;);
-      }
+    if (hasOrigArraySymbol(c, MemOpt::IN)) {
+      unsigned init_fields = g_im_stats.m_fields_copied;
+      VCgenArg(calleeG.getCell(*gv), argE, unsafeNodesCaller, simMap, side);
+      LOG("inter_mem_counters", g_im_stats.m_n_gv++;
+          if (init_fields < g_im_stats.m_fields_copied)
+              g_im_stats.m_gv_copied++;);
     }
   }
 
@@ -1499,7 +1501,7 @@ void MemUfoOpSem::recVCGenMem(const Cell &c_callee, Expr ptr,
       Cell c_callee_field(c_callee, offset);
       Cell c_caller_field = simMap.get(c_callee_field);
       if (isMemScalar(c_caller_field)) // if the field is represented with a
-                 // scalar, skip the copy
+                                       // scalar, skip the copy
         continue;
 
       // create a new name for that array if it was not created
@@ -1735,8 +1737,8 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     return;
   }
   LOG("inter_mem_fmaps",
-      errs() << "callee: " << calleeF->getGlobalIdentifier() << "\ncaller: "
-             << csi.m_cs.getCaller()->getGlobalIdentifier() << "\n";);
+      errs() << "callee: " << calleeF->getName()
+             << "\ncaller: " << csi.m_cs.getCaller()->getName() << "\n";);
 
   // associates cells in the caller graph with its exprs
   processShadowMemsCallSite(csi);
@@ -1751,6 +1753,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   for (const Argument *arg : fi.args) {
     Expr argE = s.read(symb(*CS.getArgument(arg->getArgNo())));
     csi.m_fparams.push_back(argE);
+    // TODO: add special case for null, the keys will mismatch
     if (calleeG.hasCell(*arg)) // checking that the argument is a pointer
       VCgenArg(calleeG.getCell(*arg), argE, unsafeNodesCaller, simMap,
                *calleeF);
@@ -1761,10 +1764,11 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     csi.m_fparams.push_back(argE);
     const Cell &c = calleeG.getCell(*gv); // global vars are always present
     Cell cCaller = simMap.get(c);
-    if (!EnableUniqueScalars || hasOrigArraySymbol(cCaller, MemOpt::IN)) {
-      Expr memE = getOrigMemSymbol(cCaller, MemOpt::IN);
+    // assert(bind::isFiniteMapConst(argE) || bind::isArrayConst(argE));
+    // addCIArraySymbol(cCaller, argE, MemOpt::IN);
+    if (hasOrigArraySymbol(cCaller, MemOpt::IN) ||
+        hasOrigArraySymbol(cCaller, MemOpt::OUT))
       VCgenArg(c, argE, unsafeNodesCaller, simMap, *calleeF);
-    }
   }
 
   if (fi.ret) {
@@ -1786,10 +1790,14 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       side.push_back(mk<EQ>(
           fmap, finite_map::constFiniteMap(getExprKeys(param), m_fmapDefault,
                                            getExprValues(param))));
+      assert(fmap->left()->right()->right()->arity() ==
+             getExprKeys(param).size());
+
       csi.m_fparams[i] = fmap; // replace mem param
 
-      LOG("fmap_opsem", errs() << "\t" << *param->left() << " : replaced by \n "
-                               << "\t    " << *fmap->left() << "\n";);
+      LOG("fmap_opsem", errs() << "\t" << *param << " : replaced by \n "
+                               << "\t    " << *fmap << "\n";
+          errs() << *side.back() << "\n";);
     } else if (bind::isFiniteMapConst(param) &&
                isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)))
     // +1 because fi.sumpPred->arg(0) is the function name
@@ -1876,6 +1884,10 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
                                Expr basePtrOut, NodeSet &unsafeNodes,
                                SimulationMapper &simMap, NodeSet &explored,
                                const Function &F) {
+  assert(!bind::isArrayConst(basePtrOut) &&
+         !bind::isFiniteMapConst(basePtrOut));
+
+  assert(!bind::isArrayConst(basePtrIn) && !bind::isFiniteMapConst(basePtrIn));
 
   const Node *n_callee = c_callee.getNode();
   explored.insert(n_callee);
@@ -2032,6 +2044,9 @@ Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee,
 // (requires changing the vcgen)
 void FMapUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
 
+  // m_orig_array_in.clear();
+  // m_orig_array_out.clear();
+
   unsigned i = csi.m_fparams.size() - 1;
   Instruction *I = csi.m_cs.getInstruction()->getPrevNode();
 
@@ -2060,22 +2075,72 @@ void FMapUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
   }
 }
 
+// void FMapUfoOpSem::processInitShadowMemsFunction(CallSiteInfo &csi) {
+
+//   m_orig_array_in.clear();
+
+//   Instruction *I = csi.m_cs.getInstruction(); // not prev, current?
+
+//   I->dump();
+//   errs() << "\n";
+
+//   while (I != nullptr) {
+//     CallInst *ci = nullptr;
+//     ci = dyn_cast<CallInst>(I);
+//     if (ci == nullptr)
+//       break;
+
+//     Function *f_callee = ci->getCalledFunction();
+//     if (f_callee == nullptr)
+//       break;
+//     else if (f_callee->getName().equals(
+//                  "shadow.mem.arg.init")) // which are we interested in?
+//       addCIArraySymbol(ci, m_s.havoc(symb(I)), MemOpt::IN);
+//     else
+//       break;
+//     I = I->getNextNode();
+//   }
+// }
+
 void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side,
                                SymStore &s) {
 
-  Instruction &I = *CS.getInstruction();
+//   const Function &F = *CS.getCaller();
 
-  if (!bind::isFiniteMapConst(initMem))
-    return;
+//   if (m_preproc.cached[F])
+//     return m_preproc.getKeys(F, CS.getInstruction());
 
-  Function &F = *CS.getCaller();
-  Expr fmapKeysTy = sort::finiteMapKeyTy(bind::rangeTy(bind::fname(initMem)));
+//   // obtain all the names of the init regions
+//   processInitShadowMemsFunction(csi);
 
-  auto keys =
-      llvm::make_range(fmapKeysTy->args_begin(), fmapKeysTy->args_end());
+//   GlobalAnalysis &ga = m_shadowDsa->getDsaAnalysis();
+//   // obtain simulation
+//   SimulationMapper &sm = m_preproc.getSimulationF(F);
 
-  side.push_back(
-      mk<EQ>(initMem, finite_map::constFiniteMap(keys, m_fmapDefault)));
+//   // preprocess all the init instruction following this one to obtain the
+//   // symbols
+//   Graph &buG = ga.getSummaryGraph(F);
+//   Graph &sasG = ga.getGraph(F);
+
+//   // assign a key to every distinct cell of every memory region of main
+//   // starting from the globals, cache the results to be reused
+//   for (const GlobalVariable *gv : fi.globals) {
+//     Expr argE = s.read(symb(*gv));
+//     collectReachableCells(calleeG.getCell(*gv), sm, side, s);
+//   }
+
+//   auto opt_c = m_shadowDsa->getShadowMemCell(*CI);
+//   assert(opt_c.hasValue());
+
+//   side.push_back(mk<EQ>(
+//       initMem, finite_map::constFiniteMap(
+//                    m_keys[F][opt_c.getValue()->getNode()], m_fmapDefault)));
+// }
+
+// void FMapUfoOpSem::collectReachableCells(const Cell &c, SimulationMapper &sm,
+//                                          ExprVector &side, SymStore &s) {
+
+//   ExprVector &ks = m_preproc.get
 }
 
 void FMapUfoOpSem::addArraySymbol(const Cell &c, Expr A, MemOpt ao) {

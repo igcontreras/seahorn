@@ -25,16 +25,22 @@ struct FMapExprsInfo {
   ExprMap &m_typeLmd;
   // -- to cache the keys definition of a map expression
   ExprMap &m_fmapDefk;
-
+  // -- to cache the keys definition of a map expression
   ExprMap &m_fmapVarTransf;
   ExprFactory &m_efac;
   ZSimplifier<EZ3> &m_zsimp;
 
+  // -- depth of an implication (incremented every time it is found in TD visitor
+  // and decremented in the BU rewriter)
+  // --- an optimization can be performed if the depth is 0 (no implications)
+  int & m_dimpl;
+
   FMapExprsInfo(ExprSet &vars, ExprMap &types, ExprMap &type_lmds,
-                ExprMap &fmapDefk, ExprMap &fmapVarTransf, ExprFactory &efac,
-                ZSimplifier<EZ3> &zsimp)
+                ExprMap &fmapDefk, ExprMap &fmapVarTransf,
+                int &dimpl, ExprFactory &efac, ZSimplifier<EZ3> &zsimp)
       : m_vars(vars), m_type(types), m_typeLmd(type_lmds), m_fmapDefk(fmapDefk),
-        m_fmapVarTransf(fmapVarTransf), m_efac(efac), m_zsimp(zsimp) {}
+        m_fmapVarTransf(fmapVarTransf), m_efac(efac), m_zsimp(zsimp),
+        m_dimpl(dimpl) {}
 };
 
 class FiniteMapArgRewriter : public std::unary_function<Expr, Expr> {
@@ -57,6 +63,7 @@ private:
   const ExprMap &m_pred_decl_t;
   ExprFactory &m_efac;
   ExprSet &m_evars;
+  int m_optEq = 0;
   std::shared_ptr<FiniteMapArgRewriter> m_rw;
 
 public:
@@ -80,9 +87,9 @@ class FiniteMapBodyRewriter : public std::unary_function<Expr, Expr> {
 public :
   FiniteMapBodyRewriter(ExprSet &evars, ExprMap &expr_type,
                         ExprMap &type_lambda, ExprMap &fmapDef,
-                        ExprMap &fmapVarDef, ExprFactory &efac,
+                        ExprMap &fmapVarDef, int &dimpl, ExprFactory &efac,
                         ZSimplifier<EZ3> &zsimp)
-      : m_fmei(evars, expr_type, type_lambda, fmapDef, fmapVarDef, efac, zsimp){};
+    : m_fmei(evars, expr_type, type_lambda, fmapDef, fmapVarDef, dimpl, efac, zsimp){};
 
   Expr operator()(Expr exp);
 };
@@ -95,12 +102,13 @@ private:
   ExprMap m_map_lambda;
   ExprMap m_fmapDef;
   ExprMap m_fmapVarDef;
+  int m_dimpl = 0;
   std::shared_ptr<FiniteMapBodyRewriter> m_rw;
 
 public:
   FiniteMapBodyVisitor(ExprSet &evars, ExprFactory &efac, ZSimplifier<EZ3> &zsimp) {
     m_rw = std::make_shared<FiniteMapBodyRewriter>(evars, m_types, m_map_lambda,
-                                                   m_fmapDef, m_fmapVarDef, efac, zsimp);
+                                                   m_fmapDef, m_fmapVarDef, m_dimpl, efac, zsimp);
   }
 
   VisitAction operator()(Expr exp);

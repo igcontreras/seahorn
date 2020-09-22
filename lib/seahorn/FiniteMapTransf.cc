@@ -22,8 +22,8 @@ static Expr mkVarGet(Expr mapConst, Expr k, Expr vTy) {
 }
 
 static inline Expr mkDefault(Expr base, Expr vTy) {
-  return bind::mkConst(
-      variant::tag(base, mkTerm<mpz_class>(0, vTy->efac())), vTy);
+  return bind::mkConst(variant::tag(base, mkTerm<mpz_class>(0, vTy->efac())),
+                       vTy);
 }
 
 // \brief rewrites a map into separate scalar variables. New arguments are added
@@ -48,7 +48,7 @@ void mkVarsMap(Expr map, const Range &keys, int nKs, Expr kTy, Expr vTy,
     *newArg_it++ = key;
     *newArg_it++ = v;
   }
-  Expr defaultV = mkDefault(map_values.back(),vTy);
+  Expr defaultV = mkDefault(map_values.back(), vTy);
   evars.insert(defaultV);
 
   extra_unifs.push_back(
@@ -187,14 +187,18 @@ static Expr mkFMapPrimitiveArgCore(Expr map, FMapExprsInfo &fmei) {
     return map;
 }
 
-static Expr getValueAtDef(Expr map, Expr lks, Expr k, unsigned pos, ZSimplifier<EZ3> &zsimp) {
+static Expr getValueAtDef(Expr map, Expr lks, Expr k, unsigned pos,
+                          ZSimplifier<EZ3> &zsimp) {
   if (isOpX<CONST_FINITE_MAP>(map)) {
     if (finite_map::isInitializedFiniteMap(map))
       return finite_map::fmapDefValues(map)->arg(pos);
     else
       return finite_map::fmapDefDefault(map)->left();
   } else // already an expanded map term
-    return zsimp.simplify(finite_map::mkGetValPos(map, mkTerm<mpz_class>(pos, map->efac())));
+    return zsimp.simplify(finite_map::mkGetValPos(
+        map,
+        mkTerm<mpz_class>(pos + 1, map->efac()))); // the first key is '1' vs.
+                                                   // the first argument is '0'
 }
 
 static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
@@ -208,7 +212,7 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
 
   auto keys = llvm::make_range(keysTy->args_begin(), keysTy->args_end());
 
-  Expr defaultV = mkDefault(mapConst,vTy);
+  Expr defaultV = mkDefault(mapConst, vTy);
   fmei.m_vars.insert(defaultV);
   Expr mapDef = finite_map::constFiniteMap(keys, defaultV);
   fmei.m_fmapVarTransf[mapConst] = mapDef;
@@ -226,7 +230,7 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
 static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
 
   LOG("fmap_transf", errs() << "-- mkEqCore " << *ml << " = " << *mr << "\n";);
-  Expr mrDefk = nullptr, mlDefk = nullptr;
+  Expr mrDefk, mlDefk;
 
   if (!isOpX<CONST_FINITE_MAP>(
           mr)) { // if not a definition, we get its key definition
@@ -234,26 +238,38 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
     if (bind::isFiniteMapConst(mr)) { // if variable, use its expansion
       if (fmei.m_fmapVarTransf.count(mr) == 0) {
         // if no expansion is found, create a finite map with fresh consts
-        // Expr mrEmpty = mkEmptyConstMap(mr, fmei);
-	// errs() << "Expansion not found for " << *mr << "\n\t" << *mrEmpty << "\n";
-	mr = mkEmptyConstMap(mr, fmei);
+        mr = mkEmptyConstMap(mr, fmei);
         mrDefk = finite_map::fmapDefKeys(mr);
       } else {
         mr = fmei.m_fmapVarTransf[mr];
       }
     }
-  } else
+  } else {
     mrDefk = finite_map::fmapDefKeys(mr);
+  }
+
+  assert(isOpX<CONST_FINITE_MAP_KEYS>(mrDefk));
 
   if (bind::isFiniteMapConst(ml)) {
     if (fmei.m_fmapVarTransf.count(ml) == 0) { // first appearance
-      // store map definition and transform to true
-      fmei.m_fmapDefk[ml] = mrDefk;
-      fmei.m_type[ml] = fmei.m_type[mr];
-      fmei.m_typeLmd[ml] = fmei.m_typeLmd[mr];
-      fmei.m_fmapVarTransf[ml] = mr;
 
-      return mk<TRUE>(fmei.m_efac);
+      if (fmei.m_dimpl == 0) {
+        // reduce to true equalities when the left hand side is a variable and
+        // it appeared for the first time, to use the right hand side whenever
+        // the left variable appears store map definition and transform to true
+        //
+        // this can only be done if we are not inside an implication
+        fmei.m_fmapDefk[ml] = mrDefk;
+        fmei.m_type[ml] = fmei.m_type[mr];
+        fmei.m_typeLmd[ml] = fmei.m_typeLmd[mr];
+        fmei.m_fmapVarTransf[ml] = mr;
+
+        return mk<TRUE>(fmei.m_efac);
+      }
+
+      ml = mkEmptyConstMap(ml, fmei);
+      mlDefk = finite_map::fmapDefKeys(ml);
+
     } else {
       assert(fmei.m_fmapDefk.count(ml) > 0);
       mlDefk = fmei.m_fmapDefk[ml];
@@ -263,14 +279,13 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
     mlDefk = fmei.m_fmapDefk[ml];
   }
 
+  assert(isOpX<CONST_FINITE_MAP_KEYS>(mlDefk));
+
   Expr lksl = fmei.m_typeLmd[ml];
   Expr lksr = fmei.m_typeLmd[mr];
 
   assert(lksl);
   assert(lksr);
-
-  assert(mrDefk);
-  assert(mlDefk);
 
   ExprVector conj(mlDefk->arity() *
                   2); // 2: one for the key and one for the value
@@ -283,13 +298,19 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
     if (r_it == mrDefk->args_end()) {
       errs() << "bad value matching: " << *mlDefk << "\n vs. " << *mrDefk
              << "\n";
+      assert(false);
     }
     assert(r_it != mrDefk->args_end());
     *conj_it++ = mk<EQ>(*l_it, *r_it);
     // unify values
-    *conj_it++ = mk<EQ>(getValueAtDef(ml, lksl, mlDefk->arg(i), i, fmei.m_zsimp),
-                        getValueAtDef(mr, lksr, mrDefk->arg(i), i, fmei.m_zsimp));
+    *conj_it++ =
+        mk<EQ>(getValueAtDef(ml, lksl, mlDefk->arg(i), i, fmei.m_zsimp),
+               getValueAtDef(mr, lksr, mrDefk->arg(i), i, fmei.m_zsimp));
   }
+
+  LOG("fmap_transf_eq", errs()
+                            << "new unifs: " << *boolop::land(conj) << "\n";);
+
   return boolop::land(conj);
 }
 
@@ -320,10 +341,15 @@ static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
     assert(bind::isFiniteMapConst(map));
     mkEmptyConstMap(map, fmei);
   }
-  Expr pos = fmei.m_zsimp.simplify(finite_map::mkGetPosKey(fmei.m_typeLmd[map], key));
-  // try if pos is a number, simplify, return as it is otherwise
-  return fmei.m_zsimp.simplify(op::bind::betaReduce(mkFMapPrimitiveArgCore(map, fmei), pos));
+  Expr pos =
+      fmei.m_zsimp.simplify(finite_map::mkGetPosKey(fmei.m_typeLmd[map], key));
 
+  // try if pos is a number, simplify, return as it is otherwise
+  if (!isOpX<ITE>(pos))
+    return fmei.m_zsimp.simplify(
+        finite_map::mkGetValPos(mkFMapPrimitiveArgCore(map, fmei), pos));
+  else
+    return op::bind::betaReduce(mkFMapPrimitiveArgCore(map, fmei), pos);
 }
 
 // -- rewrites a map set primitive
@@ -341,7 +367,13 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
   assert(lmdKeys);
 
   Expr procMap = mkFMapPrimitiveArgCore(map, fmei);
-  Expr res = finite_map::mkSetVal(procMap, lmdKeys, key, value);
+
+  // Expr res = finite_map::mkSetVal(procMap, lmdKeys, key, value);
+  Expr pos = fmei.m_zsimp.simplify(finite_map::mkGetPosKey(lmdKeys, key));
+  Expr res = finite_map::mkSetValPos(procMap, pos, value);
+
+  if (!isOpX<ITE>(pos))
+    res = fmei.m_zsimp.simplify(res);
 
   if (isOpX<CONST_FINITE_MAP>(map))
     fmei.m_fmapDefk[res] = finite_map::fmapDefKeys(map);
@@ -370,6 +402,8 @@ Expr FiniteMapBodyRewriter::operator()(Expr exp) {
     res = mkSetCore(exp->arg(0), exp->arg(1), exp->arg(2), m_fmei);
   } else if (isOpX<EQ>(exp)) {
     res = mkEqCore(exp->left(), exp->right(), m_fmei);
+  } else if (isOpX<IMPL>(exp)) {
+    m_fmei.m_dimpl--;
   } else { // do nothing
     assert(false && "Unexpected map expression");
     return exp;
@@ -389,11 +423,10 @@ bool FiniteMapBodyVisitor::isRewriteFiniteMapOp(Expr e) {
   // we are not visiting CONST_FINITE_MAP_KEYS and DEFAULT
 }
 
-
 VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
 
   // if (isRewriteFiniteMapOp(exp))
-  if(isOpX<CONST_FINITE_MAP>(exp) || isOpX<GET>(exp) || isOpX<SET>(exp))
+  if (isOpX<CONST_FINITE_MAP>(exp) || isOpX<GET>(exp) || isOpX<SET>(exp))
     return VisitAction::changeDoKidsRewrite(exp, m_rw);
   else if (isOpX<EQ>(exp)) {
     if (returnsFiniteMap(exp->left()) || returnsFiniteMap(exp->right())) {
@@ -403,9 +436,10 @@ VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
     }
   } else if (bind::IsConst()(exp) || bind::isFdecl(exp))
     return VisitAction::skipKids();
-  
+  else if (isOpX<IMPL>(exp))
+    m_dimpl++;
+
   return VisitAction::doKids();
 }
-
 
 } // namespace seahorn

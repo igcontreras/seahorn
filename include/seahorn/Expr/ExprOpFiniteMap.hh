@@ -211,7 +211,9 @@ inline Expr mkKeys(const Range &keys, ExprFactory &efac) {
   Expr lmdTmp = mkTerm<mpz_class>(0, efac);
   // default value for th lambda keys: a key not defined in the fmap
 
+  // TODO: this should be generic for the type of the key
   Expr keyToPos = bind::intConst(mkTerm<std::string>("x", efac));
+
   // this variable is used to represent where in the map values lambda term the
   // value of a key is stored. It is not affected by the sort of the keys or the
   // values. The lambda term for the keys will be expanded to (ite k1=k1 1 0)
@@ -225,24 +227,26 @@ inline Expr mkKeys(const Range &keys, ExprFactory &efac) {
   // the lambda function returns the position of the value corresponding to a
   // key in the lambda term that represents the values
   for (auto key : keys)
-    lmdTmp = boolop::lite(mk<EQ>(key, keyToPos), mkTerm<mpz_class>(count++, efac),
-                          lmdTmp);
+    lmdTmp = boolop::lite(mk<EQ>(key, keyToPos),
+                          mkTerm<mpz_class>(count++, efac), lmdTmp);
 
   return bind::abs<LAMBDA>(std::array<Expr, 1>{keyToPos}, lmdTmp);
 }
 
 // creates a set of keys as a lambda function
 template <typename Range>
-inline Expr mkKeys(const Range &keys, const Expr base, const Expr kTy, ExprFactory &efac) {
+inline Expr mkKeys(const Range &keys, const Expr base, const Expr kTy,
+                   ExprFactory &efac) {
 
   Expr lmdTmp = mkTerm<mpz_class>(0, efac);
   // default value for th lambda keys: a key not defined in the fmap
 
-  Expr keyToPos = bind::intConst(mkTerm<std::string>("x", efac));
+  Expr keyToPos = bind::mkConst(mkTerm<std::string>("x", efac), kTy);
   unsigned count = 1;
   for (auto key : keys)
-    lmdTmp = boolop::lite(mk<EQ>(bind::mkConst(variant::tag(base, key), kTy), keyToPos), mkTerm<mpz_class>(count++, efac),
-                          lmdTmp);
+    lmdTmp = boolop::lite(
+        mk<EQ>(bind::mkConst(variant::tag(base, key), kTy), keyToPos),
+        mkTerm<mpz_class>(count++, efac), lmdTmp);
 
   return bind::abs<LAMBDA>(std::array<Expr, 1>{keyToPos}, lmdTmp);
 }
@@ -253,6 +257,7 @@ inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
                              Expr defaultV, const Expr lmdKeys) {
 
   ExprFactory &efac = vTy->efac();
+  assert(bind::typeOf(defaultV) == vTy);
   // assuming that there is a value for every key. If this is not available,
   // "initialize" it with the default value for uninitialized memory
 
@@ -268,7 +273,8 @@ inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
   // l1 x.(ite (x == 1) v1 defaultV)
   // ln x.(ite (x == n) vn (ln-1 x))
   for (auto v : values)
-    lmdMap = boolop::lite(mk<EQ>(y, mkTerm<mpz_class>(count++, efac)), v, lmdMap);
+    lmdMap =
+        boolop::lite(mk<EQ>(y, mkTerm<mpz_class>(count++, efac)), v, lmdMap);
 
   return bind::abs<LAMBDA>(std::array<Expr, 1>{y}, lmdMap);
 }
@@ -289,15 +295,18 @@ inline Expr mkGetVal(Expr lmdMap, Expr lmdKeys, Expr key) {
 
 inline Expr mkGetPosKey(Expr lmdKeys, Expr key) {
 
-  assert(isOpX<LAMBDA>(lmdKeys));
-  return op::bind::fapp(lmdKeys, key);
+  // assert(isOpX<LAMBDA>(lmdKeys));
+  if (!isOpX<LAMBDA>(lmdKeys))
+    return lmdKeys;
+  else
+    return op::bind::fapp(lmdKeys, key);
 }
 
 // \brief operation for extracting the value when the possition is
 // already know, i.e., the keys lambda term has been resolved
 inline Expr mkGetValPos(Expr lmdMap, Expr pos) {
 
-  //return op::bind::betaReduce(lmdMap, pos);
+  // return op::bind::betaReduce(lmdMap, pos);
   return op::bind::fapp(lmdMap, pos);
 }
 
@@ -306,22 +315,32 @@ inline Expr mkGetValPos(Expr lmdMap, Expr pos) {
 //      `lmdMap` contains the values of the map as a lambda term
 //      `lmdKeys` represents the keys of the map as a lambda term
 inline Expr mkSetVal(Expr lmdMap, Expr lmdKeys, Expr key, Expr value) {
-  ExprFactory &efac = lmdMap->efac();
 
   // lmdMap may be a lambda or the default value: a number or a const.
   assert(isOpX<LAMBDA>(lmdKeys));
   assert(isOpX<FDECL>(lmdKeys->arg(0)));
 
   Expr kTy = bind::rangeTy(lmdKeys->arg(0));
-  Expr x = bind::mkConst(mkTerm<std::string>("x", efac), kTy);
-  // this internal variable needs to be of the same sort as keys
+  Expr x = bind::intConst(mkTerm<std::string>("x", lmdMap->efac()));
+  // this internal variable is an integer because we represent the positions of
+  // the keys in the map with integers
 
   Expr keyToPos = op::bind::betaReduce(lmdKeys, key);
   // keyToPos is the position in which the value for key: lmdKeys(key)
   Expr cmp = mk<EQ>(x, keyToPos);
-  Expr ite = boolop::lite(cmp, value, op::bind::betaReduce(lmdMap, x));
+  Expr ite = boolop::lite(cmp, value, bind::betaReduce(lmdMap, x));
 
   // lx.(ite ((lmdKeys key) == x) value (lmdMap x))
+  return bind::abs<LAMBDA>(std::array<Expr, 1>{x}, ite);
+}
+
+inline Expr mkSetValPos(Expr lmdMap, Expr pos, Expr value) {
+
+  Expr x = bind::intConst(mkTerm<std::string>("x", lmdMap->efac()));
+  Expr cmp = mk<EQ>(x, pos);
+  Expr ite = boolop::lite(cmp, value, bind::betaReduce(lmdMap, x));
+
+  // lx.(ite (pos == x) value (lmdMap x))
   return bind::abs<LAMBDA>(std::array<Expr, 1>{x}, ite);
 }
 
@@ -351,8 +370,8 @@ inline Expr mkMapsDecl(Expr fdecl) {
       newTypes.push_back(type);
   }
 
-  Expr newfname = bind::fapp(fdecl); // to go back easier, the new name includes
-                                     // the old declaration
+  Expr newfname = bind::fapp(fdecl); // to go back easier, the new name
+                                     // includes the old declaration
   return fmap_arg ? bind::fdecl(newfname, newTypes) : fdecl;
 }
 

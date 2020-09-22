@@ -212,6 +212,8 @@ class FMapUfoOpSem : public MemUfoOpSem {
   // -- default value for uninitialized values of maps
   Expr m_fmapDefault;
 
+  FMapExprMap m_initKeys;
+
 public:
   FMapUfoOpSem(expr::ExprFactory &efac, Pass &pass, const DataLayout &dl,
                std::shared_ptr<InterMemPreProc> preproc,
@@ -244,7 +246,7 @@ private:
   Expr fmVariant(Expr e, const ExprVector &keys);
   void addKeyVal(Cell c, Expr basePtr, Expr offset, MemOpt ao);
   void storeVal(Cell c, Expr readFrom, Expr basePtr, Expr offset);
-  
+
   // creates an ExprVector if not initialized already
   ExprVector &getExprKeys(Expr e) { return m_fmKeys[e]; }
   bool hasExprKeys(Expr e) { return m_fmKeys.count(e) > 0; }

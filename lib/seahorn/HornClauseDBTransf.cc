@@ -106,6 +106,8 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 
     tdb.registerRelation(newPredDecl); // register relation in transformed db
   }
 
+  LOG("print_fmap_arg_clauses", errs() << "------- FMAPS CLAUSE DB ------\n";);
+
   TypeChecker tc;
   for (const auto &rule : db.getRules()) {
     const ExprVector &vars = rule.vars();
@@ -119,6 +121,8 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 
       ruleE = mk<IMPL>(rule.body(), rule.head());
     else
       ruleE = rule.get();
+
+    LOG("print_fmap_arg_clauses", errs() << *ruleE << "\n\n";);
 
     Expr newRuleE = visit(fmav, ruleE, dvc);
     HornRule newRule(allVars, newRuleE);
@@ -147,6 +151,10 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 
   std::vector<HornRule> worklist;
   boost::copy(tdb.getRules(), std::back_inserter(worklist));
   ZSimplifier<EZ3> zsimp(zcontext);
+  // auto params = zsimp.params();
+  // params.set("flat", false);
+  // params.set("some", false);
+  LOG("print_fmap_body_clauses", errs() << "------- FMAPS NO ARGS CLAUSE DB ------\n";);
 
   for (auto rule : worklist) {
     ExprVector vars = rule.vars();
@@ -173,6 +181,7 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 
         if (tc.typeOf(newRule.get()) == sort::errorTy(efac)) {
           errs() << *tc.getErrorExp() << "\n";
         });
+    LOG("print_fmap_body_clauses", errs() << *rule.get() << "\n\n";);
 
     tdb.removeRule(rule);
     tdb.addRule(newRule);
