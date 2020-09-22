@@ -27,6 +27,7 @@
 #include "seahorn/HornWrite.hh"
 #include "seahorn/HornifyModule.hh"
 #include "seahorn/Houdini.hh"
+#include "seahorn/InitializePasses.hh"
 #include "seahorn/Passes.hh"
 #include "seahorn/PredicateAbstraction.hh"
 #include "seahorn/Support/SeaLog.hh"
@@ -197,6 +198,11 @@ static llvm::cl::opt<bool>
                             llvm::cl::desc("Lower some global initializers"),
                             llvm::cl::init(true));
 
+static llvm::cl::opt<bool> EvalBranchSentinelOpt(
+    "eval-branch-sentinel",
+    llvm::cl::desc("Evaluate intrinsics added by AddBranchSentinel pass."),
+    llvm::cl::init(false));
+
 // removes extension from filename if there is one
 std::string getFileName(const std::string &str) {
   std::string filename = str;
@@ -350,6 +356,11 @@ int main(int argc, char **argv) {
     pass_manager.add(seahorn::createNondetInitPass());
   pass_manager.add(seahorn::createSeaDsaShadowMemPass());
 
+  // Preceding passes may introduce overflow intrinsics. This is undesirable if
+  // we are not in BMC mode.
+  if (!Bmc)
+    pass_manager.add(seahorn::createLowerArithWithOverflowIntrinsicsPass());
+
   pass_manager.add(new seahorn::RemoveUnreachableBlocksPass());
   pass_manager.add(seahorn::createStripLifetimePass());
   // pass_manager.add(seahorn::createDeadNondetElimPass()); // TODO: fix for ShadowMem
@@ -373,7 +384,10 @@ int main(int argc, char **argv) {
 
   // --- verify if an undefined value can be read
   pass_manager.add(seahorn::createCanReadUndefPass());
-
+  if (EvalBranchSentinelOpt) {
+    initializeEvalBranchSentinelPassPass(Registry);
+    pass_manager.add(seahorn::createEvalBranchSentinelPassPass());
+  }
   // Z3_open_log("log.txt");
 
   if (!Bmc && !BoogieOutput) {

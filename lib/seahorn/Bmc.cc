@@ -11,28 +11,34 @@
 #include "seahorn/Expr/HexDump.hh"
 #include "seahorn/Support/SeaDebug.h"
 
-static llvm::cl::opt<bool>
-    DumpHex("horn-bmc-hexdump",
-            llvm::cl::desc("Dump memory state using hexdump"), cl::init(false));
-static llvm::cl::opt<std::string>
-    BmcSmtTactic("horn-bmc-tactic", llvm::cl::desc("Z3 tactic to use for BMC"),
-                 cl::init("default"));
-static llvm::cl::opt<std::string>
-    BmcSmtLogic("horn-bmc-logic", llvm::cl::desc("SMT-LIB logic to pass to Z3"),
-                 cl::init("ALL"));
+namespace seahorn {
+std::string BmcSmtLogic;
+std::string BmcSmtTactic;
+bool DumpHex;
+} // namespace seahorn
+
+static llvm::cl::opt<bool, true>
+    XDumpHex("horn-bmc-hexdump",
+             llvm::cl::desc("Dump memory state using hexdump"),
+             llvm::cl::location(seahorn::DumpHex), cl::init(false));
+static llvm::cl::opt<std::string, true>
+    XBmcSmtTactic("horn-bmc-tactic", llvm::cl::desc("Z3 tactic to use for BMC"),
+                  llvm::cl::location(seahorn::BmcSmtTactic),
+                  cl::init("default"));
+static llvm::cl::opt<std::string, true>
+    XBmcSmtLogic("horn-bmc-logic",
+                 llvm::cl::desc("SMT-LIB logic to pass to smt solver"),
+                 llvm::cl::location(seahorn::BmcSmtLogic), cl::init("ALL"));
 
 namespace seahorn {
 BmcEngine::BmcEngine(OperationalSemantics &sem, EZ3 &zctx)
     : m_sem(sem), m_efac(sem.efac()), m_result(boost::indeterminate),
-      m_cpg(nullptr), m_fn(nullptr), m_smt_solver(zctx, BmcSmtLogic.c_str()), m_ctxState(m_efac) {
+      m_cpg(nullptr), m_fn(nullptr), m_smt_solver(zctx, BmcSmtLogic.c_str()),
+      m_ctxState(m_efac) {
 
   z3n_set_param(":model.compact", false);
   if (BmcSmtTactic != "default")
     z3n_set_param(":tactic.default_tactic", BmcSmtTactic.c_str());
-
-  // ZParams<EZ3> params(zctx);
-  // params.set("tactic.default_tactic", "smtfd");
-  // m_smt_solver.set(params);
 }
 
 void BmcEngine::addCutPoint(const CutPoint &cp) {
@@ -102,6 +108,14 @@ void BmcEngine::reset() {
 void BmcEngine::unsatCore(ExprVector &out) {
   const bool simplify = true;
   bmc_impl::unsat_core(m_smt_solver, m_side, simplify, out);
+}
+
+/// output current path condition in SMT-LIB2 format
+raw_ostream &BmcEngine::toSmtLib(raw_ostream &out) {
+  if (BmcSmtLogic != "ALL")
+    out << "(set-logic " << BmcSmtLogic << ")\n";
+  encode();
+  return m_smt_solver.toSmtLib(out);
 }
 
 BmcTrace BmcEngine::getTrace() {
@@ -264,6 +278,8 @@ template <> raw_ostream &BmcTrace::print(raw_ostream &out) {
         } else if (f && f->getName().equals("shadow.mem.store")) {
           shadow_mem = true;
         }
+      } else if (isa<PHINode>(I)) {
+        shadow_mem = I.hasMetadata("shadow.mem");
       }
 
       if (print_inst) {

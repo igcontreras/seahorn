@@ -10,6 +10,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "seahorn/Support/SeaDebug.h"
+#include "seahorn/Support/SeaLog.hh"
 
 #include "llvm/Analysis/CallGraph.h"
 using namespace llvm;
@@ -25,9 +26,11 @@ bool PromoteVerifierCalls::runOnModule(Module &M) {
   m_assumeFn = SBI.mkSeaBuiltinFn(SBIOp::ASSUME, M);
   Function *assumeNotFn = SBI.mkSeaBuiltinFn(SBIOp::ASSUME_NOT, M);
   m_assertFn = SBI.mkSeaBuiltinFn(SBIOp::ASSERT, M);
+  m_assertNotFn = SBI.mkSeaBuiltinFn(SBIOp::ASSERT_NOT, M);
   m_failureFn = SBI.mkSeaBuiltinFn(SBIOp::FAIL, M);
   m_errorFn = SBI.mkSeaBuiltinFn(SBIOp::ERROR, M);
   m_is_deref = SBI.mkSeaBuiltinFn(SBIOp::IS_DEREFERENCEABLE, M);
+  m_assert_if = SBI.mkSeaBuiltinFn(SBIOp::ASSERT_IF, M);
 
   // XXX DEPRECATED
   // Do not keep unused functions in llvm.used
@@ -67,6 +70,7 @@ bool PromoteVerifierCalls::runOnModule(Module &M) {
     cg->getOrInsertFunction(m_assumeFn);
     cg->getOrInsertFunction(assumeNotFn);
     cg->getOrInsertFunction(m_assertFn);
+    cg->getOrInsertFunction(m_assertNotFn);
     cg->getOrInsertFunction(m_errorFn);
     cg->getOrInsertFunction(m_failureFn);
   }
@@ -99,7 +103,8 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
       fn = dyn_cast<const Function>(CS.getCalledValue()->stripPointerCasts());
 
     if (fn && (fn->getName().equals("__VERIFIER_assume") ||
-               fn->getName().equals("DISABLED__VERIFIER_assert") ||
+               fn->getName().equals("__VERIFIER_assert") ||
+               fn->getName().equals("__VERIFIER_assert_not") ||
                // CBMC
                fn->getName().equals("__CPROVER_assume") ||
                /** pagai embedded invariants */
@@ -115,24 +120,16 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
         nfn = m_assumeFn;
       else if (fn->getName().equals("__VERIFIER_assert"))
         nfn = m_assertFn;
+      else if (fn->getName().equals("__VERIFIER_assert_not"))
+        nfn = m_assertNotFn;
       else if (fn->getName().equals("__CPROVER_assume"))
         nfn = m_assumeFn;
       else
         continue;
 
-      Value *cond = CS.getArgument(0);
-
-      // strip zext if there is one
-      if (const ZExtInst *ze = dyn_cast<const ZExtInst>(cond))
-        cond = ze->getOperand(0);
-
       IRBuilder<> Builder(F.getContext());
-      Builder.SetInsertPoint(&I);
-
-      // -- convert to Boolean if needed
-      if (!cond->getType()->isIntegerTy(1))
-        cond = Builder.CreateICmpNE(cond, ConstantInt::get(cond->getType(), 0));
-
+      Value *cond = CS.getArgument(0);
+      coerceToBool(cond, Builder, I);
       CallInst *ci = Builder.CreateCall(nfn, cond);
       if (cg)
         (*cg)[&F]->addCalledFunction(ci, (*cg)[ci->getCalledFunction()]);
@@ -175,6 +172,23 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
 
       I.replaceAllUsesWith(ci);
       toKill.push_back(&I);
+    } else if (fn && (fn->getName().equals(
+                         "__VERIFIER_assert_if"))) { // sea_assert_if is the
+                                                     // user facing name
+      IRBuilder<> Builder(F.getContext());
+      // arg0: antecedent
+      // arg1: consequent
+      Value *arg0 = CS.getArgument(0);
+      coerceToBool(arg0, Builder, I);
+      Value *arg1 = CS.getArgument(1);
+      coerceToBool(arg0, Builder, I);
+
+      CallInst *ci = Builder.CreateCall(m_assert_if, {arg0, arg1});
+      if (cg)
+        (*cg)[&F]->addCalledFunction(ci, (*cg)[ci->getCalledFunction()]);
+
+      I.replaceAllUsesWith(ci);
+      toKill.push_back(&I);
     }
   }
 
@@ -182,6 +196,19 @@ bool PromoteVerifierCalls::runOnFunction(Function &F) {
     I->eraseFromParent();
 
   return Changed;
+}
+
+void PromoteVerifierCalls::coerceToBool(Value *arg, IRBuilder<> &builder,
+                                        Instruction &I) {
+  assert(arg);
+  // strip zext if there is one
+  if (const ZExtInst *ze = dyn_cast<const ZExtInst>(arg))
+    arg = ze->getOperand(0);
+
+  builder.SetInsertPoint(&I);
+  // -- convert to Boolean if needed
+  if (!arg->getType()->isIntegerTy(1))
+    arg = builder.CreateICmpNE(arg, ConstantInt::get(arg->getType(), 0));
 }
 
 void PromoteVerifierCalls::getAnalysisUsage(AnalysisUsage &AU) const {

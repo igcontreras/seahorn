@@ -19,6 +19,8 @@ using namespace llvm;
 #define VERIFIER_ASSERT_FN "verifier.assert"
 #define VERIFIER_ASSERT_NOT_FN "verifier.assert.not"
 #define SEA_IS_DEREFERENCEABLE "sea.is_dereferenceable"
+#define SEA_ASSERT_IF "sea.assert.if"
+#define SEA_BRANCH_SENTINEL "sea.branch_sentinel"
 
 SeaBuiltinsOp
 seahorn::SeaBuiltinsInfo::getSeaBuiltinOp(const llvm::CallBase &cb) const {
@@ -28,12 +30,16 @@ seahorn::SeaBuiltinsInfo::getSeaBuiltinOp(const llvm::CallBase &cb) const {
     return SBIOp::UNKNOWN;
 
   return StringSwitch<SBIOp>(F->getName())
-    .Case(VERIFIER_ERROR_FN, SBIOp::ERROR)
-    .Case(SEAHORN_FAIL_FN, SBIOp::FAIL)
-    .Case(VERIFIER_ASSUME_FN, SBIOp::ASSUME)
-    .Case(VERIFIER_ASSUME_NOT_FN, SBIOp::ASSUME_NOT)
-    .Case(SEA_IS_DEREFERENCEABLE, SBIOp::IS_DEREFERENCEABLE)
-    .Default(SBIOp::UNKNOWN);
+      .Case(VERIFIER_ERROR_FN, SBIOp::ERROR)
+      .Case(SEAHORN_FAIL_FN, SBIOp::FAIL)
+      .Case(VERIFIER_ASSUME_FN, SBIOp::ASSUME)
+      .Case(VERIFIER_ASSUME_NOT_FN, SBIOp::ASSUME_NOT)
+      .Case(SEA_IS_DEREFERENCEABLE, SBIOp::IS_DEREFERENCEABLE)
+      .Case(SEA_ASSERT_IF, SBIOp::ASSERT_IF)
+      .Case(VERIFIER_ASSERT_FN, SBIOp::ASSERT)
+      .Case(VERIFIER_ASSERT_NOT_FN, SBIOp::ASSERT_NOT)
+      .Case(SEA_BRANCH_SENTINEL, SBIOp::BRANCH_SENTINEL)
+      .Default(SBIOp::UNKNOWN);
 }
 
 llvm::Function *SeaBuiltinsInfo::mkSeaBuiltinFn(SeaBuiltinsOp op,
@@ -51,6 +57,13 @@ llvm::Function *SeaBuiltinsInfo::mkSeaBuiltinFn(SeaBuiltinsOp op,
     return mkAssertAssumeFn(M, op);
   case SBIOp::IS_DEREFERENCEABLE:
     return mkIsDereferenceable(M);
+  case SBIOp::ASSERT_IF:
+    return mkAssertIfFn(M);
+  case SBIOp::ASSERT:
+  case SBIOp::ASSERT_NOT:
+    return mkAssertFn(M, op);
+  case SBIOp::BRANCH_SENTINEL:
+    return mkBranchSentinelFn(M);
   }
   llvm_unreachable(nullptr);
 }
@@ -102,12 +115,6 @@ Function *SeaBuiltinsInfo::mkAssertAssumeFn(Module &M, SeaBuiltinsOp op) {
   case SBIOp::ASSUME_NOT:
     name = VERIFIER_ASSUME_NOT_FN;
     break;
-  case SBIOp::ASSERT:
-    name = VERIFIER_ASSERT_FN;
-    break;
-  case SBIOp::ASSERT_NOT:
-    name = VERIFIER_ASSERT_NOT_FN;
-    break;
   }
   auto FC = M.getOrInsertFunction(name, Type::getVoidTy(C), Type::getInt1Ty(C));
   auto *FN = dyn_cast<Function>(FC.getCallee());
@@ -134,6 +141,59 @@ Function *SeaBuiltinsInfo::mkIsDereferenceable(Module &M) {
   return FN;
 }
 
+Function *SeaBuiltinsInfo::mkAssertIfFn(llvm::Module &M) {
+  auto &C = M.getContext();
+  auto FC = M.getOrInsertFunction(SEA_ASSERT_IF, Type::getVoidTy(C),
+                                  Type::getInt1Ty(C), Type::getInt1Ty(C));
+  auto *FN = dyn_cast<Function>(FC.getCallee());
+  if (FN) {
+    FN->setOnlyAccessesInaccessibleMemory();
+    FN->setDoesNotThrow();
+    FN->setDoesNotFreeMemory();
+    FN->setDoesNotRecurse();
+  }
+  return FN;
+}
+
+Function *SeaBuiltinsInfo::mkAssertFn(llvm::Module &M, SeaBuiltinsOp op) {
+  char *name = nullptr;
+  switch (op) {
+  default:
+    assert(false);
+    llvm_unreachable(nullptr);
+  case SeaBuiltinsOp::ASSERT:
+    name = VERIFIER_ASSERT_FN;
+    break;
+  case SeaBuiltinsOp::ASSERT_NOT:
+    name = VERIFIER_ASSERT_NOT_FN;
+    break;
+  }
+  auto &C = M.getContext();
+  auto FC = M.getOrInsertFunction(name, Type::getVoidTy(C), Type::getInt1Ty(C));
+  auto *FN = dyn_cast<Function>(FC.getCallee());
+  if (FN) {
+    FN->setOnlyAccessesInaccessibleMemory();
+    FN->setDoesNotThrow();
+    FN->setDoesNotFreeMemory();
+    FN->setDoesNotRecurse();
+  }
+  return FN;
+}
+
+Function *SeaBuiltinsInfo::mkBranchSentinelFn(llvm::Module &M) {
+  auto &C = M.getContext();
+  auto FC = M.getOrInsertFunction(SEA_BRANCH_SENTINEL, Type::getVoidTy(C),
+                                  Type::getInt1Ty(C));
+  auto *FN = dyn_cast<Function>(FC.getCallee());
+  if (FN) {
+    FN->setOnlyAccessesInaccessibleMemory();
+    FN->setDoesNotThrow();
+    FN->setDoesNotFreeMemory();
+    FN->setDoesNotRecurse();
+  }
+  return FN;
+}
+
 SeaBuiltinsInfoWrapperPass::SeaBuiltinsInfoWrapperPass() : ImmutablePass(ID) {
   initializeSeaBuiltinsInfoWrapperPassPass(*PassRegistry::getPassRegistry());
 }
@@ -144,9 +204,7 @@ llvm::ImmutablePass *seahorn::createSeaBuiltinsWrapperPass() {
   return new SeaBuiltinsInfoWrapperPass();
 }
 
-namespace llvm {
 using namespace seahorn;
 INITIALIZE_PASS(SeaBuiltinsInfoWrapperPass, "sea-builtins",
                 "Information and construciton of builtin seahorn functions",
                 false, true)
-} // namespace llvm
