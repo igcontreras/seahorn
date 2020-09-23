@@ -56,6 +56,7 @@ public:
   NodeSet &getUnsafeNodesCalleeCS(const Instruction *I);
 
   bool isSafeNode(NodeSet &unsafe, const seadsa::Node *n);
+  bool isSafeNode(const NodeSet &unsafe, const seadsa::Node *n);
   bool isSafeNodeFunc(const Node &n, const Function *f);
 
   void runOnFunction(const Function *f);

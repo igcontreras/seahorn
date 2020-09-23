@@ -15,7 +15,7 @@ using namespace llvm;
 enum class EColor { BLACK, GRAY }; // colors for exploration
 using ExplorationMap = DenseMap<const Node *, EColor>;
 
-bool isSafeNode(NodeSet &unsafe, const Node *n) { return unsafe.count(n) == 0; }
+bool isSafeNode(const NodeSet &unsafe, const Node *n) { return unsafe.count(n) == 0; }
 
 // -- true if 2 nodes encode a memory object of unbounded size
 static bool isUnboundedMem(const Node *nSumm, const Node *nTD) {
@@ -205,6 +205,10 @@ NodeSet &InterMemPreProc::getUnsafeNodesCalleeCS(const Instruction *I) {
 }
 
 bool InterMemPreProc::isSafeNode(NodeSet &unsafe, const Node *n) {
+  return !::isSafeNode(unsafe, n);
+}
+
+bool InterMemPreProc::isSafeNode(const NodeSet &unsafe, const Node *n) {
   return !::isSafeNode(unsafe, n);
 }
 

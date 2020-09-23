@@ -160,7 +160,7 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 
     ExprVector vars = rule.vars();
     ExprSet allVars(vars.begin(), vars.end());
 
-    DagVisitCache dvc; // same for all the clauses?
+    DagVisitCache dvc;
     FiniteMapBodyVisitor fmv(allVars, efac, zsimp);
 
     Expr body = visit(fmv, rule.body(), dvc);

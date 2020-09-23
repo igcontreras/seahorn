@@ -92,14 +92,15 @@ public:
 
 enum class MemOpt { IN, OUT };
 
+// map to store the correspondence between node ids and their correspondent
+// expression
+using NodeIdMap = DenseMap<std::pair<const seadsa::Node *, unsigned>, Expr>;
+
 class MemUfoOpSem : public UfoOpSem {
 protected:
   std::shared_ptr<InterMemPreProc> m_preproc = nullptr;
   seadsa::ShadowMem *m_shadowDsa = nullptr;
 
-  // map to store the correspondence between node ids and their correspondent
-  // expression
-  using NodeIdMap = DenseMap<std::pair<const seadsa::Node *, unsigned>, Expr>;
   // original arrays names of a cell
   NodeIdMap m_orig_array_in;
   NodeIdMap m_orig_array_out;
@@ -139,8 +140,7 @@ protected:
                 NodeSet &unsafeCallerNodes, seadsa::SimulationMapper &sm,
                 ExprVector &side);
   void recVCGenMem(const seadsa::Cell &c_callee, Expr ptr, NodeSet &unsafeNodes,
-                   seadsa::SimulationMapper &simMap, NodeSet &explored,
-                   ExprVector &side);
+                   seadsa::SimulationMapper &simMap, ExprVector &side);
 
   // Internal methods to handle array expressions and cells.
   void addCIArraySymbol(CallInst *CI, Expr A, MemOpt ao);
@@ -160,6 +160,8 @@ protected:
   // expressions that correspond to each of the cells involved.
   virtual void processShadowMemsCallSite(CallSiteInfo &csi);
 
+  Expr getExprNode(const NodeIdMap &ni, const Cell &c);
+  Expr getExprNode(const NodeIdMap &nim, const Node &n);
   // \brief true if `c` is encoded with a scalar variable
   bool isMemScalar(const Cell &c);
 
@@ -191,6 +193,27 @@ struct InterMemStats {
 
 class FMapUfoOpSem : public MemUfoOpSem {
 
+public:
+  FMapUfoOpSem(expr::ExprFactory &efac, Pass &pass, const DataLayout &dl,
+               std::shared_ptr<InterMemPreProc> preproc,
+               TrackLevel trackLvl = MEM,
+               FunctionPtrSet abs_fns = FunctionPtrSet(), ShadowMem *dsa = NULL)
+      : MemUfoOpSem(efac, pass, dl, preproc, trackLvl, abs_fns, dsa) {
+    m_keyBase = mkTerm<std::string>("k", efac);
+    m_fmapDefault = mkTerm<expr::mpz_class>(0UL, m_efac);
+  }
+
+  Expr symb(const Value &v) override;
+  void execCallSite(CallSiteInfo &CS, ExprVector &side, SymStore &s) override;
+
+  void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
+                   SymStore &s) override;
+
+protected:
+  void processShadowMemsCallSite(CallSiteInfo &csi) override;
+  void addArraySymbol(const seadsa::Cell &c, Expr A, MemOpt ao) override;
+
+private:
   // hides how the memory is split
   using FMapExprMap = std::map<Expr, ExprVector>;
   // -- Expr needs to be replaced by a map with the keys in this std::map
@@ -214,34 +237,20 @@ class FMapUfoOpSem : public MemUfoOpSem {
 
   FMapExprMap m_initKeys;
 
-public:
-  FMapUfoOpSem(expr::ExprFactory &efac, Pass &pass, const DataLayout &dl,
-               std::shared_ptr<InterMemPreProc> preproc,
-               TrackLevel trackLvl = MEM,
-               FunctionPtrSet abs_fns = FunctionPtrSet(), ShadowMem *dsa = NULL)
-      : MemUfoOpSem(efac, pass, dl, preproc, trackLvl, abs_fns, dsa) {
-    m_keyBase = mkTerm<std::string>("k", efac);
-    m_fmapDefault = mkTerm<expr::mpz_class>(0UL, m_efac);
-  }
+  using NodeKeysMap = DenseMap<const seadsa::Node *, ExprVector>;
+  using FunctionNodeKeysMap = std::map<const Function *, NodeKeysMap>;
+  FunctionNodeKeysMap m_fNodeKeysM;
 
-  Expr symb(const Value &v) override;
-  void execCallSite(CallSiteInfo &CS, ExprVector &side, SymStore &s) override;
+  using FunctionNodeIdMap = std::map<const Function *, NodeIdMap>;
+  FunctionNodeIdMap m_fInitSymbNodes;
 
-  void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
-                   SymStore &s) override;
-
-protected:
-  void processShadowMemsCallSite(CallSiteInfo &csi) override;
-  void addArraySymbol(const seadsa::Cell &c, Expr A, MemOpt ao) override;
-
-private:
   void VCgenArg(const Cell &cArgCallee, Expr basePtr,
-                NodeSet &unsafeCallerNodes, SimulationMapper &sm,
+                const NodeSet &unsafeCallerNodes, SimulationMapper &sm,
                 const Function &F);
 
   void recVCGenMem(const Cell &c_callee, Expr ptrInt, Expr ptrOut,
-                   NodeSet &unsafeNodes, SimulationMapper &simMap,
-                   NodeSet &explored, const Function &F);
+                   const NodeSet &unsafeNodes, SimulationMapper &simMap,
+                   const Function &F);
 
   Expr fmVariant(Expr e, const ExprVector &keys);
   void addKeyVal(Cell c, Expr basePtr, Expr offset, MemOpt ao);
@@ -255,6 +264,25 @@ private:
   Expr memSetValue(Expr mem, Expr offset, Expr v);
   Expr getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee, MemOpt ao,
                          const Function &F);
+  void recCollectReachableKeys(const Cell &c, const Function &F, Expr basePtr,
+                               const NodeSet &safeNs, SimulationMapper &sm,
+                               NodeKeysMap &nkm, NodeIdMap &nim);
+  void processInitShadowMemsFunction(Instruction *I, NodeIdMap &nim);
+
+  bool processedNodeKeysFunction(const Function &F) {
+    return m_fNodeKeysM.count(&F) > 0;
+  }
+  NodeKeysMap &getNodeKeysFunction(const Function &F) {
+    return m_fNodeKeysM[&F]; // creates it if it doesn't exist
+  }
+
+  bool hasNodeSymbFunction(const Function &F) {
+    return m_fInitSymbNodes.count(&F) > 0;
+  }
+  NodeIdMap &getNodeSymbsFunction(const Function &F) {
+    return m_fInitSymbNodes[&F]; // creates it if it
+                                                         // doesn't exist
+  }
 };
 
 } // namespace seahorn

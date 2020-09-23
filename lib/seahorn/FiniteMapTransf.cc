@@ -14,6 +14,11 @@ namespace seahorn {
 //  FiniteMapArgsVisitor
 // ----------------------------------------------------------------------
 
+static Expr mkVarKey(Expr mapConst, Expr k, Expr kTy) {
+  assert(bind::isFiniteMapConst(mapConst));
+  return bind::mkConst(variant::tag(mapConst, k), kTy);
+}
+
 // -- creates a constant with the name get(map,k)
 // also used in FinteMapBodyVisitor
 static Expr mkVarGet(Expr mapConst, Expr k, Expr vTy) {
@@ -39,9 +44,9 @@ void mkVarsMap(Expr map, const Range &keys, int nKs, Expr kTy, Expr vTy,
   Expr mapName = bind::name(bind::fname(map));
 
   for (auto k : keys) {
-    key = bind::mkConst(variant::tag(mapName, k), kTy);
+    key = mkVarKey(map, k, kTy);
     *k_it++ = key;
-    v = mkVarGet(map, key, vTy);
+    v = mkVarGet(map, k, vTy);
     *v_it++ = v;
     evars.insert(v);
     evars.insert(key);
@@ -205,16 +210,24 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
   Expr mapTy = bind::rangeTy(bind::name(mapConst));
   Expr vTy = sort::finiteMapValTy(mapTy);
   Expr keysTy = sort::finiteMapKeyTy(mapTy);
+  Expr kTy = bind::rangeTy(bind::name(keysTy->first()));
+  ExprVector keys(keysTy->arity());
+  ExprVector values(keysTy->arity());
 
-  for (auto k_it = keysTy->args_begin(); k_it != keysTy->args_end(); k_it++) {
+  auto k_it = keys.begin();
+  auto v_it = values.begin();
+  for (auto kty_it = keysTy->args_begin(); kty_it != keysTy->args_end();
+       kty_it++, k_it++, v_it++) {
+    *k_it = mkVarKey(mapConst, *kty_it, kTy);
     fmei.m_vars.insert(*k_it);
+    *v_it = mkVarGet(mapConst, *kty_it, vTy);
+    fmei.m_vars.insert(*v_it);
   }
-
-  auto keys = llvm::make_range(keysTy->args_begin(), keysTy->args_end());
 
   Expr defaultV = mkDefault(mapConst, vTy);
   fmei.m_vars.insert(defaultV);
-  Expr mapDef = finite_map::constFiniteMap(keys, defaultV);
+
+  Expr mapDef = finite_map::constFiniteMap(keys, defaultV, values);
   fmei.m_fmapVarTransf[mapConst] = mapDef;
   fmei.m_type[mapConst] = mapTy;
   fmei.m_type[mapDef] = mapTy;
@@ -232,17 +245,18 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
   LOG("fmap_transf", errs() << "-- mkEqCore " << *ml << " = " << *mr << "\n";);
   Expr mrDefk, mlDefk;
 
-  if (!isOpX<CONST_FINITE_MAP>(
-          mr)) { // if not a definition, we get its key definition
-    mrDefk = fmei.m_fmapDefk[mr];
+  if (!isOpX<CONST_FINITE_MAP>(mr)) {
     if (bind::isFiniteMapConst(mr)) { // if variable, use its expansion
-      if (fmei.m_fmapVarTransf.count(mr) == 0) {
+      if (fmei.m_fmapDefk.count(mr) == 0) {
         // if no expansion is found, create a finite map with fresh consts
         mr = mkEmptyConstMap(mr, fmei);
         mrDefk = finite_map::fmapDefKeys(mr);
-      } else {
+      } else { // already expanded const
+        mrDefk = fmei.m_fmapDefk[mr];
         mr = fmei.m_fmapVarTransf[mr];
       }
+    } else {  // already expanded expression
+      mrDefk = fmei.m_fmapDefk[mr];
     }
   } else {
     mrDefk = finite_map::fmapDefKeys(mr);
@@ -251,27 +265,10 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
   assert(isOpX<CONST_FINITE_MAP_KEYS>(mrDefk));
 
   if (bind::isFiniteMapConst(ml)) {
-    if (fmei.m_fmapVarTransf.count(ml) == 0) { // first appearance
-
-      if (fmei.m_dimpl == 0) {
-        // reduce to true equalities when the left hand side is a variable and
-        // it appeared for the first time, to use the right hand side whenever
-        // the left variable appears store map definition and transform to true
-        //
-        // this can only be done if we are not inside an implication
-        fmei.m_fmapDefk[ml] = mrDefk;
-        fmei.m_type[ml] = fmei.m_type[mr];
-        fmei.m_typeLmd[ml] = fmei.m_typeLmd[mr];
-        fmei.m_fmapVarTransf[ml] = mr;
-
-        return mk<TRUE>(fmei.m_efac);
-      }
-
+    if (fmei.m_fmapDefk.count(ml) == 0) { // first appearance
       ml = mkEmptyConstMap(ml, fmei);
       mlDefk = finite_map::fmapDefKeys(ml);
-
     } else {
-      assert(fmei.m_fmapDefk.count(ml) > 0);
       mlDefk = fmei.m_fmapDefk[ml];
       ml = fmei.m_fmapVarTransf[ml];
     }
@@ -386,6 +383,31 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
   return res;
 }
 
+static Expr getDefFmapConst(Expr m, FMapExprsInfo &fmei) {
+  if (fmei.m_fmapDefk.count(m) == 0)
+    return finite_map::fmapDefKeys(mkEmptyConstMap(m, fmei));
+  else
+    return fmei.m_fmapDefk[m];
+}
+
+static Expr mkSameKeysCore(Expr lmap, Expr er, FMapExprsInfo &fmei) {
+
+  Expr defl = getDefFmapConst(lmap, fmei);
+
+  Expr defr = bind::isFiniteMapConst(er) ? getDefFmapConst(er, fmei) : er;
+
+  assert(defl->arity() == defr->arity());
+  ExprVector conj(defl->arity());
+
+  auto c_it = conj.begin();
+  auto l_it = defl->args_begin();
+  auto r_it = defr->args_begin();
+  for (; l_it != defl->args_end(); c_it++, l_it++, r_it++) {
+    *c_it = mk<EQ>(*l_it, *r_it);
+  }
+
+  return boolop::land(conj);
+}
 } // namespace
 
 namespace seahorn {
@@ -402,8 +424,8 @@ Expr FiniteMapBodyRewriter::operator()(Expr exp) {
     res = mkSetCore(exp->arg(0), exp->arg(1), exp->arg(2), m_fmei);
   } else if (isOpX<EQ>(exp)) {
     res = mkEqCore(exp->left(), exp->right(), m_fmei);
-  } else if (isOpX<IMPL>(exp)) {
-    m_fmei.m_dimpl--;
+  } else if (isOpX<SAME_KEYS>(exp)) {
+    res = mkSameKeysCore(exp->left(), exp->right(), m_fmei);
   } else { // do nothing
     assert(false && "Unexpected map expression");
     return exp;
@@ -426,7 +448,8 @@ bool FiniteMapBodyVisitor::isRewriteFiniteMapOp(Expr e) {
 VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
 
   // if (isRewriteFiniteMapOp(exp))
-  if (isOpX<CONST_FINITE_MAP>(exp) || isOpX<GET>(exp) || isOpX<SET>(exp))
+  if (isOpX<CONST_FINITE_MAP>(exp) || isOpX<GET>(exp) || isOpX<SET>(exp) ||
+      isOpX<SAME_KEYS>(exp))
     return VisitAction::changeDoKidsRewrite(exp, m_rw);
   else if (isOpX<EQ>(exp)) {
     if (returnsFiniteMap(exp->left()) || returnsFiniteMap(exp->right())) {
@@ -436,8 +459,6 @@ VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
     }
   } else if (bind::IsConst()(exp) || bind::isFdecl(exp))
     return VisitAction::skipKids();
-  else if (isOpX<IMPL>(exp))
-    m_dimpl++;
 
   return VisitAction::doKids();
 }

@@ -36,8 +36,6 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
 
   // main does not need a summary
   if (F.getName().equals("main")) {
-    // if (m_interprocFmaps) // the finite memory regions need to be precomputed
-    //   m_parent.getInterMemPP().preprocFunction(&F);
     return;
   }
 

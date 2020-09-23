@@ -17,7 +17,8 @@ enum class FiniteMapOpKind {
   FINITE_MAP_VAL_DEFAULT,
   CONST_FINITE_MAP,
   SET,
-  GET
+  GET,
+  SAME_KEYS
 };
 
 namespace typeCheck {
@@ -43,6 +44,8 @@ NOP(FINITE_MAP_VAL_DEFAULT, "fmap-default", FUNCTIONAL, FiniteMapOp,
     typeCheck::finiteMapType::ValuesDefault)
 NOP(GET, "get", FUNCTIONAL, FiniteMapOp, typeCheck::finiteMapType::Get)
 NOP(SET, "set", FUNCTIONAL, FiniteMapOp, typeCheck::finiteMapType::Set)
+NOP(SAME_KEYS, "same-keys", FUNCTIONAL, FiniteMapOp,
+    typeCheck::finiteMapType::FiniteMap) // TODO: type checking
 
 namespace typeCheck {
 namespace finiteMapType {
@@ -171,8 +174,9 @@ inline Expr constFiniteMap(const Range &keys, Expr def) {
 
 // construct when ALL the values of the map are known (they can be
 // variables)
-template <typename Range>
-inline Expr constFiniteMap(const Range &keys, Expr def, const Range &values) {
+// -- the iterators may be of different type
+template <typename Range1, typename Range2>
+inline Expr constFiniteMap(const Range1 &keys, Expr def, const Range2 &values) {
   return mk<CONST_FINITE_MAP>(constFiniteMapKeys(keys),
                               constFiniteMapDefault(def),
                               constFiniteMapValues(values));
@@ -199,6 +203,14 @@ inline bool isInitializedFiniteMap(Expr m) {
 
 inline Expr get(Expr map, Expr idx) { return mk<GET>(map, idx); }
 inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
+
+inline Expr constraintKeys(Expr map1, Expr map2) {
+  return mk<SAME_KEYS>(map1, map2);
+}
+template <typename Range>
+inline Expr constraintKeys(Expr map, const Range &keys) {
+  return mk<SAME_KEYS>(map, constFiniteMapKeys(keys));
+}
 
 // --------------- transformation to lambda functions ------------------------
 // \brief the empty map is just the default value `defaultV`
