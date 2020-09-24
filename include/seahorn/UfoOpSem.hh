@@ -86,7 +86,7 @@ public:
   unsigned fieldOff(const StructType *t, unsigned field);
 
   virtual void execCallSite(CallSiteInfo &csi, ExprVector &side, SymStore &s);
-  virtual void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
+  virtual void execMemInit(CallSite &CS, ExprVector &side,
                            SymStore &s){}; // do nothing
 };
 
@@ -206,8 +206,7 @@ public:
   Expr symb(const Value &v) override;
   void execCallSite(CallSiteInfo &CS, ExprVector &side, SymStore &s) override;
 
-  void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
-                   SymStore &s) override;
+  void execMemInit(CallSite &CS, ExprVector &side, SymStore &s) override;
 
 protected:
   void processShadowMemsCallSite(CallSiteInfo &csi) override;
@@ -242,7 +241,7 @@ private:
   FunctionNodeKeysMap m_fNodeKeysM;
 
   using FunctionNodeIdMap = std::map<const Function *, NodeIdMap>;
-  FunctionNodeIdMap m_fInitSymbNodes;
+  FunctionNodeIdMap m_fInitSymNodes;
 
   void VCgenArg(const Cell &cArgCallee, Expr basePtr,
                 const NodeSet &unsafeCallerNodes, SimulationMapper &sm,
@@ -267,7 +266,8 @@ private:
   void recCollectReachableKeys(const Cell &c, const Function &F, Expr basePtr,
                                const NodeSet &safeNs, SimulationMapper &sm,
                                NodeKeysMap &nkm, NodeIdMap &nim);
-  void processInitShadowMemsFunction(Instruction *I, NodeIdMap &nim);
+  void processInitShadowMemsFunction(Instruction *I, NodeIdMap &nim,
+                                     SymStore &s);
 
   bool processedNodeKeysFunction(const Function &F) {
     return m_fNodeKeysM.count(&F) > 0;
@@ -276,12 +276,12 @@ private:
     return m_fNodeKeysM[&F]; // creates it if it doesn't exist
   }
 
-  bool hasNodeSymbFunction(const Function &F) {
-    return m_fInitSymbNodes.count(&F) > 0;
+  bool hasNodeSymFunction(const Function &F) {
+    return m_fInitSymNodes.count(&F) > 0;
   }
-  NodeIdMap &getNodeSymbsFunction(const Function &F) {
-    return m_fInitSymbNodes[&F]; // creates it if it
-                                                         // doesn't exist
+  NodeIdMap &getNodeSymFunction(const Function &F) {
+    return m_fInitSymNodes[&F]; // creates it if it
+                                // doesn't exist
   }
 };
 

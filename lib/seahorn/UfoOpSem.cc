@@ -790,12 +790,11 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         // regions initialized in main are global. We want them to
         // flow to the arguments
         /* do nothing */
-      } // else if (PF.getName().equals("main") &&
-      //            F.getName().equals("shadow.mem.arg.init")) {
-      //   // initialize the keys of the regions in the main function
-      //   m_inMem = m_s.read(symb(*CS.getArgument(1))); // TODO: not used inside
-      //   m_sem.execMemInit(CS, m_inMem, m_side, m_s);
-      // }
+      } else if (PF.getName().equals("main") &&
+                 F.getName().equals("shadow.mem.arg.init")) {
+        // initialize the keys of the regions in the main function
+        m_sem.execMemInit(CS, m_side, m_s);
+      }
     } else {
       if (m_fparams.size() > 3) {
 
@@ -1685,8 +1684,7 @@ Expr FMapUfoOpSem::symb(const Value &I) {
             auto ks_it = keys.begin();
 
             for (int i = 0; i < nKs; i++, ks_it++)
-              *ks_it = bind::intConst(
-                  variant::variant(i, m_keyBase));
+              *ks_it = bind::intConst(variant::variant(i, m_keyBase));
 
             Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
             LOG("fmap_symb", errs() << *v << ": "
@@ -1771,12 +1769,23 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   for (const GlobalVariable *gv : fi.globals) {
     Expr argE = s.read(symb(*gv));
     csi.m_fparams.push_back(argE);
-    const Cell &c = calleeG.getCell(*gv); // global vars are always present
+    // const Cell &c = calleeG.getCell(*gv); // global vars are always present
+    // Cell cCaller = simMap.get(c);
+    // if (hasOrigArraySymbol(cCaller, MemOpt::IN) ||
+    //     hasOrigArraySymbol(cCaller, MemOpt::OUT))
+    //   VCgenArg(c, argE, unsafeNodesCaller, simMap, *calleeF);
+  }
+
+  // Copying more than necessary, the keys and values that are not reachable
+  // from the live globals could be replaced by fresh consts. However, to
+  // preserve the same order, to avoid having many different contexts
+  // depending of the globals that are live, we are copying everything
+  for (auto &kv : calleeG.globals()) {
+    const Cell &c = *kv.second;
     Cell cCaller = simMap.get(c);
-    // assert(bind::isFiniteMapConst(argE) || bind::isArrayConst(argE));
     if (hasOrigArraySymbol(cCaller, MemOpt::IN) ||
         hasOrigArraySymbol(cCaller, MemOpt::OUT))
-      VCgenArg(c, argE, unsafeNodesCaller, simMap, *calleeF);
+      VCgenArg(c, s.read(symb(*kv.first)), unsafeNodesCaller, simMap, *calleeF);
   }
 
   if (fi.ret) {
@@ -2034,8 +2043,7 @@ Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee,
     ExprVector keys(nKs);
     auto key_it = keys.begin();
     for (int i = 0; i < nKs; i++, key_it++)
-      *key_it =
-          bind::intConst(variant::variant(i, m_keyBase));
+      *key_it = bind::intConst(variant::variant(i, m_keyBase));
 
     Expr newE = fmVariant(origE, keys);
     m_replace[origE] = newE;
@@ -2047,9 +2055,6 @@ Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee,
 // differs from MemUfoOpSem in the 'shadow.mem.arg.new' -> change there
 // (requires changing the vcgen)
 void FMapUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
-
-  // m_orig_array_in.clear();
-  // m_orig_array_out.clear();
 
   unsigned i = csi.m_fparams.size() - 1;
   Instruction *I = csi.m_cs.getInstruction()->getPrevNode();
@@ -2079,10 +2084,8 @@ void FMapUfoOpSem::processShadowMemsCallSite(CallSiteInfo &csi) {
   }
 }
 
-void FMapUfoOpSem::processInitShadowMemsFunction(Instruction *I,
-                                                 NodeIdMap &nim) {
-
-  errs() << *I << "\n";
+void FMapUfoOpSem::processInitShadowMemsFunction(Instruction *I, NodeIdMap &nim,
+                                                 SymStore &s) {
 
   while (I != nullptr) {
     CallInst *ci = nullptr;
@@ -2097,29 +2100,30 @@ void FMapUfoOpSem::processInitShadowMemsFunction(Instruction *I,
       auto opt_c = m_shadowDsa->getShadowMemCell(*ci);
       assert(opt_c.hasValue());
       Cell &c = opt_c.getValue();
-      nim.insert({{c.getNode(), getOffset(c)}, symb(*I)});
+      nim.insert({{c.getNode(), getOffset(c)}, s.havoc(symb(*I))});
     } else
       break;
     I = I->getNextNode();
   }
 }
 
-void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side,
-                               SymStore &s) {
+void FMapUfoOpSem::execMemInit(CallSite &CS, ExprVector &side, SymStore &s) {
 
   const Function &F = *CS.getCaller();
 
-  if (processedNodeKeysFunction(F))
-    return;
+  bool preprocessed = hasNodeSymFunction(F);
+  NodeIdMap &nim = getNodeSymFunction(F);
 
-  LOG("fmaps_mem_init", errs() << "-- inits of function " << F.getName() << "\n");
+  if (!preprocessed) {
+    // to store the symbol of each memory region
+    // obtain all the names of the init regions
+    processInitShadowMemsFunction(CS.getInstruction(), nim, s);
+  }
+
+  NodeKeysMap &nkm = getNodeKeysFunction(F);
+  nkm.clear();
 
   const FunctionInfo &fi = getFunctionInfo(F);
-
-  NodeIdMap &nim = getNodeSymbsFunction(F);
-  // to store the symbol of each memory region
-  // obtain all the names of the init regions
-  processInitShadowMemsFunction(CS.getInstruction(), nim);
 
   GlobalAnalysis &ga = m_shadowDsa->getDsaAnalysis();
   // obtain simulation
@@ -2129,13 +2133,11 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side,
   Graph &sasG = ga.getGraph(F);
   NodeSet &safe = m_preproc->getUnsafeNodes(&F);
 
-  NodeKeysMap &nkm = getNodeKeysFunction(F);
-
   for (const Argument &arg : F.args()) {
-    Expr argE =
-        s.read(symb(*CS.getArgument(arg.getArgNo()))); // TODO: check this name
-    if (buG.hasCell(arg)) // checking that the argument is a pointer
-      recCollectReachableKeys(buG.getCell(arg), F, argE, safe, sm, nkm, nim);
+    if (buG.hasCell(arg)){ // checking that the argument is a pointer
+      Expr argE = s.read(symb(arg));
+      recCollectReachableKeys(buG.getCell(arg), F, argE, safe, sm, nkm,nim);
+    }
   }
   // assign a key to every distinct cell of every memory region of main
   // starting from the globals, cache the results to be reused
@@ -2146,20 +2148,27 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr initMem, ExprVector &side,
     recCollectReachableKeys(c, F, argE, safe, sm, nkm, nim);
   }
 
-  if (fi.ret) {
-    Expr retE = s.read(symb(*CS.getInstruction()));
-    if (buG.hasCell(*fi.ret)) {
-      const Cell &c = buG.getCell(*fi.ret); // no
-      recCollectReachableKeys(c, F, retE, safe, sm, nkm, nim);
-    }
-  }
+  // if (fi.ret) {
+  //   Expr retE = s.read(symb(*CS.getInstruction()));
+  //   if (buG.hasCell(*fi.ret)) {
+  //     const Cell &c = buG.getCell(*fi.ret); // no
+  //     recCollectReachableKeys(c, F, retE, safe, sm, nkm, nim);
+  //   }
+  // }
 
-  // -- second step, create a map definition for each reachable node that is a
-  // map, provided that the symbol is there
-  for (auto &kv : nkm) {
-    const Node *n = kv.first;
-    Expr memE = getExprNode(nim, *n);
-    side.push_back(finite_map::constraintKeys(memE, kv.second));
+  // -- add the constraints to the fmap for the node of the instruction
+  const CallInst *CI = dyn_cast<const CallInst>(CS.getInstruction());
+  assert(CI);
+  auto opt_c = m_shadowDsa->getShadowMemCell(*CI);
+  assert(opt_c.hasValue());
+  const Node *n = opt_c.getValue().getNode();
+
+  Expr memE = getExprNode(nim, *n);
+  // TODO: complete the constraints with fresh consts if the finite map has more
+  // than found through globals
+  if (nkm.count(n) > 0) { // unsafe nodes are not finite maps
+    assert(nkm[n].size() > 0);
+    side.push_back(finite_map::constraintKeys(memE, nkm[n]));
     LOG("fmaps_mem_init", errs() << *side.back() << "\n");
   }
 }
@@ -2173,7 +2182,7 @@ void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
   const Cell &cSAS = sm.get(cBU);
   const Node *nSAS = cSAS.getNode();
 
-  if (cBU.getNode()->types().empty())
+  if (!m_preproc->isSafeNode(safeNs, nSAS) || cBU.getNode()->types().empty())
     return;
 
   ExprVector &keysN = nkm[nSAS]; // creates the vector if it doesn't exist yet
