@@ -152,7 +152,7 @@ bool HornSolver::runOnModule(Module &M) {
   // -- less incremental but constraints are popped after pushed in
   //    the solver
   params.set(":spacer.keep_proxy", KeepProxy);
-  params.set(":spacer.ground_pobs", false);
+  params.set(":spacer.ground_pobs", true);
   params.set(":spacer.use_euf_gen", UseEufGen);
   params.set(":spacer.max_level", HornMaxDepth);
   // params.set(":spacer.blast_term_ite_inflation", 0U);
