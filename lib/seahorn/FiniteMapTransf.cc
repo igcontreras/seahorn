@@ -284,11 +284,18 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
   assert(lksl);
   assert(lksr);
 
-  ExprVector conj(mlDefk->arity() *
-                  2); // 2: one for the key and one for the value
+  bool skipKs = (mlDefk == mrDefk);
+  bool skipVs = (ml == mr);
+
+  if(skipKs && skipVs) // skip this if it is the same expansion of keys and values
+    return mk<TRUE>(fmei.m_efac);
+
+  // unsigned size = (!skipVs && !skipKs) ? 2 : 1;
+  // ExprVector conj(mlDefk->arity() * size);
+  ExprVector conj;
   auto l_it = mlDefk->args_begin();
   auto r_it = mrDefk->args_begin();
-  auto conj_it = conj.begin();
+  // auto conj_it = conj.begin();
 
   for (int i = 0; l_it != mlDefk->args_end(); i++, l_it++, r_it++) {
     // unify keys (from the definition)
@@ -298,17 +305,24 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
       assert(false);
     }
     assert(r_it != mrDefk->args_end());
-    *conj_it++ = mk<EQ>(*l_it, *r_it);
-    // unify values
-    *conj_it++ =
-        mk<EQ>(getValueAtDef(ml, lksl, mlDefk->arg(i), i, fmei.m_zsimp),
-               getValueAtDef(mr, lksr, mrDefk->arg(i), i, fmei.m_zsimp));
+
+    if(!skipKs)
+      conj.push_back(mk<EQ>(*l_it, *r_it));
+
+    if (!skipVs) {// unify values
+      Expr vl = getValueAtDef(ml, lksl, mlDefk->arg(i), i,
+                              fmei.m_zsimp);
+      Expr vr = getValueAtDef(mr, lksr, mrDefk->arg(i), i,
+                              fmei.m_zsimp);
+      if(vl != vr)
+        conj.push_back(mk<EQ>(vl, vr));
+    }
   }
 
   LOG("fmap_transf_eq", errs()
                             << "new unifs: " << *boolop::land(conj) << "\n";);
 
-  return boolop::land(conj);
+  return conj.empty() ? mk<TRUE>(fmei.m_efac) :  boolop::land(conj);
 }
 
 // -- processes a fmap definition, building the type and the lmdkeys
