@@ -86,7 +86,7 @@ public:
   unsigned fieldOff(const StructType *t, unsigned field);
 
   virtual void execCallSite(CallSiteInfo &csi, ExprVector &side, SymStore &s);
-  virtual void execMemInit(CallSite &CS, ExprVector &side,
+  virtual void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
                            SymStore &s){}; // do nothing
 };
 
@@ -159,6 +159,8 @@ protected:
   // processes the shadow mem instructions prior to a callsite to obtain the
   // expressions that correspond to each of the cells involved.
   virtual void processShadowMemsCallSite(CallSiteInfo &csi);
+  bool hasExprNode(const NodeIdMap &ni, const Cell &c);
+  bool hasExprNode(const NodeIdMap &ni, const Node &n);
 
   Expr getExprNode(const NodeIdMap &ni, const Cell &c);
   Expr getExprNode(const NodeIdMap &nim, const Node &n);
@@ -206,7 +208,8 @@ public:
   Expr symb(const Value &v) override;
   void execCallSite(CallSiteInfo &CS, ExprVector &side, SymStore &s) override;
 
-  void execMemInit(CallSite &CS, ExprVector &side, SymStore &s) override;
+  void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
+                   SymStore &s) override;
 
 protected:
   void processShadowMemsCallSite(CallSiteInfo &csi) override;
@@ -268,6 +271,8 @@ private:
                                NodeKeysMap &nkm, NodeIdMap &nim);
   void processInitShadowMemsFunction(Instruction *I, NodeIdMap &nim,
                                      SymStore &s);
+
+  void storeSymInitInstruction(Instruction *I, NodeIdMap &nim, Expr memE);
 
   bool processedNodeKeysFunction(const Function &F) {
     return m_fNodeKeysM.count(&F) > 0;
