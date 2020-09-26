@@ -272,6 +272,8 @@ private:
   void processInitShadowMemsFunction(Instruction *I, NodeIdMap &nim,
                                      SymStore &s);
 
+  void recAddSortedDef(const Expr map, const Expr def, const ExprMap &defs,
+                  ExprSet &added, ExprVector &side);
   void storeSymInitInstruction(Instruction *I, NodeIdMap &nim, Expr memE);
 
   bool processedNodeKeysFunction(const Function &F) {

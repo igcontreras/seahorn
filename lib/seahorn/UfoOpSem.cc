@@ -1777,11 +1777,6 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   for (const GlobalVariable *gv : fi.globals) {
     Expr argE = s.read(symb(*gv));
     csi.m_fparams.push_back(argE);
-    // const Cell &c = calleeG.getCell(*gv); // global vars are always present
-    // Cell cCaller = simMap.get(c);
-    // if (hasOrigArraySymbol(cCaller, MemOpt::IN) ||
-    //     hasOrigArraySymbol(cCaller, MemOpt::OUT))
-    //   VCgenArg(c, argE, unsafeNodesCaller, simMap, *calleeF);
   }
 
   // Copying more than necessary, the keys and values that are not reachable
@@ -1874,10 +1869,27 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   assert(checkArgs(bind::fapp(fi.sumPred, csi.m_fparams)));
   side.push_back(bind::fapp(fi.sumPred, csi.m_fparams));
 
+  ExprMap extraDefs;
   // store back in caller variables
-  for (auto e_pair : m_replace)
-    if (m_fmOut.count(e_pair.first) > 0) // if it is an output mem symbol
-      side.push_back(mk<EQ>(e_pair.first, m_fmOut[e_pair.first]));
+  for (auto kv : m_replace) {
+    Expr param = kv.first;
+    Expr fmap = kv.second;
+    if (m_fmOut.count(param) > 0) { // if it is an output mem symbol
+      extraDefs[fmap] =
+          mk<AND>(mk<EQ>(param, m_fmOut[param]),
+                  finite_map::constrainKeys(kv.second, getExprKeys(param)));
+    } else {
+      extraDefs[fmap] = mk<EQ>(
+          fmap, finite_map::constFiniteMap(getExprKeys(param), m_fmapDefault,
+                                           getExprValues(param)));
+    }
+  }
+
+  // add definitions in an ordered way
+  ExprSet added; // stores the definitions already addded
+  for (auto kv : extraDefs) {
+    recAddSortedDef(kv.first, kv.second, extraDefs, added, side);
+  }
 
   // reset for the next callsite
   m_orig_array_in.clear();
@@ -1887,6 +1899,27 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   m_fmValues.clear();
   m_fmOut.clear();
   m_exprCell.clear();
+}
+
+void FMapUfoOpSem::recAddSortedDef(const Expr map, const Expr def,
+                                   const ExprMap &defs, ExprSet &added,
+                                   ExprVector &side) {
+
+  if (added.count(map) > 0)
+    return;
+
+  added.insert(map); // mark now to avoid inserting it twice
+  ExprSet deps;
+  filter(
+      def, [](Expr e) { return bind::isFiniteMapConst(e); },
+      std::inserter(deps, deps.begin()));
+
+  for (auto m_it : deps) {
+    auto d_it = defs.find(map);
+    assert(d_it != defs.end());
+    recAddSortedDef(m_it, d_it->second, defs, added, side);
+  }
+  side.push_back(def);
 }
 
 Expr FMapUfoOpSem::fmVariant(Expr e, const ExprVector &keys) {
@@ -2130,7 +2163,8 @@ void FMapUfoOpSem::storeSymInitInstruction(Instruction *I, NodeIdMap &nim,
   nim.insert({{c.getNode(), getOffset(c)}, memE});
 }
 
-void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side, SymStore &s) {
+void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
+                               SymStore &s) {
 
   const Function &F = *CS.getCaller();
   NodeIdMap &nim = getNodeSymFunction(F);
