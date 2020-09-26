@@ -220,7 +220,7 @@ inline Expr mkEmptyMap(Expr defaultV) { return defaultV; }
 template <typename Range>
 inline Expr mkKeys(const Range &keys, ExprFactory &efac) {
 
-  Expr lmdTmp = mkTerm<mpz_class>(0, efac);
+  Expr lmdTmp = mkTerm<mpz_class>(1, efac);
   // default value for th lambda keys: a key not defined in the fmap
 
   // TODO: this should be generic for the type of the key
