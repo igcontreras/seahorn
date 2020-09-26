@@ -251,8 +251,7 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
       if (fmei.m_fmapDefk.count(mr) == 0) {
         assert(false); // we don't want this, everything has to be already defined
         // if no expansion is found, create a finite map with fresh consts
-        mr = mkEmptyConstMap(mr, fmei);
-        mrDefk = finite_map::fmapDefKeys(mr);
+        return mk<EQ>(ml,mr);
       } else { // already expanded const
         mrDefk = fmei.m_fmapDefk[mr];
         mr = fmei.m_fmapVarTransf[mr];
