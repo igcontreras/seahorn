@@ -199,11 +199,12 @@ static Expr getValueAtDef(Expr map, Expr lks, Expr k, unsigned pos,
       return finite_map::fmapDefValues(map)->arg(pos);
     else
       return finite_map::fmapDefDefault(map)->left();
-  } else // already an expanded map term
-    return zsimp.simplify(finite_map::mkGetValPos(
-        map,
-        mkTerm<mpz_class>(pos + 1, map->efac()))); // the first key is '1' vs.
-                                                   // the first argument is '0'
+  } // already an expanded map term
+
+  return zsimp.simplify(finite_map::mkGetValPos(
+      map, mkTerm<mpz_class>(pos + 1, map->efac()))); // the position of first
+                                                      // key is '1' vs. the
+                                                      // first argument is '0'
 }
 
 static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
@@ -255,7 +256,7 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
         mrDefk = fmei.m_fmapDefk[mr];
         mr = fmei.m_fmapVarTransf[mr];
       }
-    } else {  // already expanded expression
+    } else { // already expanded expression
       mrDefk = fmei.m_fmapDefk[mr];
     }
   } else {
@@ -287,7 +288,8 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
   bool skipKs = (mlDefk == mrDefk);
   bool skipVs = (ml == mr);
 
-  if(skipKs && skipVs) // skip this if it is the same expansion of keys and values
+  if (skipKs &&
+      skipVs) // skip this if it is the same expansion of keys and values
     return mk<TRUE>(fmei.m_efac);
 
   // unsigned size = (!skipVs && !skipKs) ? 2 : 1;
@@ -306,23 +308,18 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
     }
     assert(r_it != mrDefk->args_end());
 
-    if(!skipKs)
+    if (!skipKs && *l_it != *r_it)
       conj.push_back(mk<EQ>(*l_it, *r_it));
 
-    if (!skipVs) {// unify values
-      Expr vl = getValueAtDef(ml, lksl, mlDefk->arg(i), i,
-                              fmei.m_zsimp);
-      Expr vr = getValueAtDef(mr, lksr, mrDefk->arg(i), i,
-                              fmei.m_zsimp);
-      if(vl != vr)
+    if (!skipVs) { // unify values
+      Expr vl = getValueAtDef(ml, lksl, mlDefk->arg(i), i, fmei.m_zsimp);
+      Expr vr = getValueAtDef(mr, lksr, mrDefk->arg(i), i, fmei.m_zsimp);
+      if (vl != vr)
         conj.push_back(mk<EQ>(vl, vr));
     }
   }
 
-  LOG("fmap_transf_eq", errs()
-                            << "new unifs: " << *boolop::land(conj) << "\n";);
-
-  return conj.empty() ? mk<TRUE>(fmei.m_efac) :  boolop::land(conj);
+  return conj.empty() ? mk<TRUE>(fmei.m_efac) : boolop::land(conj);
 }
 
 // -- processes a fmap definition, building the type and the lmdkeys
@@ -379,12 +376,9 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
 
   Expr procMap = mkFMapPrimitiveArgCore(map, fmei);
 
-  // Expr res = finite_map::mkSetVal(procMap, lmdKeys, key, value);
   Expr pos = fmei.m_zsimp.simplify(finite_map::mkGetPosKey(lmdKeys, key));
   Expr res = finite_map::mkSetValPos(procMap, pos, value);
-
-  if (!isOpX<ITE>(pos))
-    res = fmei.m_zsimp.simplify(res);
+  res = fmei.m_zsimp.simplify(res);
 
   if (isOpX<CONST_FINITE_MAP>(map))
     fmei.m_fmapDefk[res] = finite_map::fmapDefKeys(map);
