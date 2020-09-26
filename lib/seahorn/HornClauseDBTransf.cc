@@ -83,7 +83,8 @@ void copy_if(Set &src, Set &dst, Predicate shouldCopy) {
 }
 
 // -- tdb is an empty db that will contain db after transformation
-void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 &zcontext) {
+void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb,
+                                       EZ3 &zctx) {
   ScopedStats _st_("HornFmaps");
 
   ExprFactory &efac = tdb.getExprFactory();
@@ -150,11 +151,15 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb, EZ3 
   // Remove Finite Maps from Bodies
   std::vector<HornRule> worklist;
   boost::copy(tdb.getRules(), std::back_inserter(worklist));
-  ZSimplifier<EZ3> zsimp(zcontext);
-  // auto params = zsimp.params();
-  // params.set("flat", false);
-  // params.set("some", false);
-  LOG("print_fmap_body_clauses", errs() << "------- FMAPS NO ARGS CLAUSE DB ------\n";);
+
+  ZSimplifier<EZ3> zsimp(zctx);
+  zsimp.params().set("pull_cheap_ite", true);
+  zsimp.params().set("ite_extra_rules", true);
+  zsimp.params().set("flat", false);
+  zsimp.params().set("som", false);
+
+  LOG("print_fmap_body_clauses",
+      errs() << "------- FMAPS NO ARGS CLAUSE DB ------\n";);
 
   for (auto rule : worklist) {
     ExprVector vars = rule.vars();
