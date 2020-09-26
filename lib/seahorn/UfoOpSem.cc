@@ -1680,27 +1680,28 @@ Expr FMapUfoOpSem::symb(const Value &I) {
           assert(opt_c.hasValue());
           const Node &n = *const_cast<Node *>(opt_c.getValue().getNode());
 
-          unsigned nKs =
-              m_preproc->getNumAccesses(&n, F); // this should be by cell
+          if (m_preproc->isSafeNode(m_preproc->getUnsafeNodes(F), &n)) {
+            unsigned nKs =
+                m_preproc->getNumAccesses(&n, F); // this should be by cell
 
-          if (nKs > 0) {
-            NodeSet &safeNodes = m_preproc->getUnsafeNodes(F);
-            assert(m_preproc->isSafeNode(safeNodes, &n));
-            Expr v = mkTerm<const Value *>(&I, m_efac); // same name as array
-                                                        // but different sort
-            ExprVector keys(nKs);
-            auto ks_it = keys.begin();
+            if (nKs > 0) { // may be safe but not accessed
+              Expr v = mkTerm<const Value *>(&I, m_efac); // same name as array
+                                                          // but different sort
+              ExprVector keys(nKs);
+              auto ks_it = keys.begin();
 
-            for (int i = 0; i < nKs; i++, ks_it++)
-              *ks_it = bind::intConst(variant::variant(i, m_keyBase));
+              for (int i = 0; i < nKs; i++, ks_it++)
+                *ks_it = bind::intConst(variant::variant(i, m_keyBase));
 
-            Expr intTy = sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
-            LOG("fmap_symb", errs() << *v << ": "
-                                    << *sort::finiteMapTy(intTy, keys)
-                                    << "\nnode:";
-                n.dump());
+              Expr intTy =
+                  sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
+              LOG("fmap_symb", errs() << *v << ": "
+                                      << *sort::finiteMapTy(intTy, keys)
+                                      << "\nnode:";
+                  n.dump());
 
-            return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
+              return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
+            }
           }
         } else if (const PHINode *PI = dyn_cast<const PHINode>(&I)) {
           Value *vPI = PI->getIncomingValue(0);

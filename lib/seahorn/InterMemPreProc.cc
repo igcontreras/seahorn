@@ -1,4 +1,5 @@
 #include "llvm/ADT/SCCIterator.h"
+#include "llvm/Support/CommandLine.h"
 
 #include "seahorn/InterMemPreProc.hh"
 #include "seahorn/Support/SeaDebug.h"
@@ -6,6 +7,11 @@
 #include "seadsa/CallGraphUtils.hh"
 #include "seadsa/DsaAnalysis.hh"
 #include "seadsa/Global.hh"
+
+static llvm::cl::opt<unsigned> MaxKeys(
+    "horn-fmap-max-keys",
+    llvm::cl::desc("Maximum number of different keys allowed in a finite map"),
+    cl::init(1));
 
 namespace {
 
@@ -15,7 +21,9 @@ using namespace llvm;
 enum class EColor { BLACK, GRAY }; // colors for exploration
 using ExplorationMap = DenseMap<const Node *, EColor>;
 
-bool isSafeNode(const NodeSet &unsafe, const Node *n) { return unsafe.count(n) == 0; }
+bool isSafeNode(const NodeSet &unsafe, const Node *n) {
+  return unsafe.count(n) == 0;
+}
 
 // -- true if 2 nodes encode a memory object of unbounded size
 static bool isUnboundedMem(const Node *nSumm, const Node *nTD) {
@@ -143,6 +151,12 @@ bool InterMemPreProc::runOnModule(Module &M) {
 
   const GlobalAnalysis &ga = m_shadowDsa.getDsaAnalysis();
 
+  // -- needs to be done before because we want to know CI which nodes not to
+  // copy according to a threshold
+  for (const Function &f : M)
+    if (ga.hasSummaryGraph(f))
+      runOnFunction(&f);
+
   llvm::CallGraph &cg = m_ccg.getCompleteCallGraph();
   for (auto it = scc_begin(&cg); !it.isAtEnd(); ++it) {
     auto &scc = *it;
@@ -181,15 +195,21 @@ bool InterMemPreProc::runOnModule(Module &M) {
         NodeSet &safeCaller = getUnsafeNodesCallerCS(I); // creates it
         computeSafeNodesSimulation(*(const_cast<Graph *>(&calleeG)), *f_callee,
                                    safeCallee, safeCaller, simMap);
+
+        // remove from safe the ones that are not CI safe because of the threshold
+        NodeSet &safeCI = getUnsafeNodes(f_callee);
+        SimulationMapper &smSAS = m_smF[f_callee];
+
+        for (auto n : safeCallee){
+          const Node * nSAS = smSAS.get(*n).getNode();
+          if (!isSafeNode(safeCI, nSAS)){
+            safeCallee.erase(n); // TODO: ????
+            safeCaller.erase(simMap.get(*n).getNode());
+          }
+        }
       }
     }
   }
-
-  // this includes auxiliary functions, how do I get the original written by the
-  // user?
-  for (const Function &f : M)
-    if (ga.hasSummaryGraph(f))
-      runOnFunction(&f);
 
   return false;
 }
@@ -250,6 +270,15 @@ void InterMemPreProc::runOnFunction(const Function *F) {
 
   if (buG.hasRetCell(*F))
     recProcessNode(buG.getRetCell(*F), safeSAS, simMap, rm);
+
+  // -- remove the nodes that would be encoded with finite maps bigger than the
+  // threshold
+  for (auto kv : rm)
+    if(kv.second > MaxKeys){
+      kv.second = 0; // TODO: does this work?
+      safeSAS.erase(kv.first); // remove a safe to be used for the CS safe nodes
+    }
+
 }
 
 unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
@@ -284,7 +313,6 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &toSafeNodes,
   // follow the pointers of the node
   for (auto &links : nFrom->getLinks())
     recProcessNode(*links.second, toSafeNodes, simMap, rm);
-
 }
 
 } // namespace seahorn
