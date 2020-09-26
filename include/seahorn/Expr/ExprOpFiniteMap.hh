@@ -204,11 +204,11 @@ inline bool isInitializedFiniteMap(Expr m) {
 inline Expr get(Expr map, Expr idx) { return mk<GET>(map, idx); }
 inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
 
-inline Expr constraintKeys(Expr map1, Expr map2) {
+inline Expr constrainKeys(Expr map1, Expr map2) {
   return mk<SAME_KEYS>(map1, map2);
 }
 template <typename Range>
-inline Expr constraintKeys(Expr map, const Range &keys) {
+inline Expr constrainKeys(Expr map, const Range &keys) {
   return mk<SAME_KEYS>(map, constFiniteMapKeys(keys));
 }
 

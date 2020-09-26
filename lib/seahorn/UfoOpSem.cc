@@ -1811,7 +1811,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     if (hasExprKeys(param)) { // parameter that is copied
       Expr fmap = m_replace[param];
       if (m_fmOut.count(param)) // out memory
-        side.push_back(finite_map::constraintKeys(fmap, getExprKeys(param)));
+        side.push_back(finite_map::constrainKeys(fmap, getExprKeys(param)));
       else {
         assert(m_fmValues.count(param) > 0);
         // -- add map definition
@@ -2140,12 +2140,11 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side, SymSto
 
   // if it is the last init instruction
   I = I->getNextNode();
-  CallInst * ci = dyn_cast<CallInst>(I);
+  CallInst *ci = dyn_cast<CallInst>(I);
   if (ci) {
     Function *f_callee = ci->getCalledFunction();
-    if (f_callee &&
-        (f_callee->getName().equals("shadow.mem.arg.init") ||
-         f_callee->getName().equals("shadow.mem.init")))
+    if (f_callee && (f_callee->getName().equals("shadow.mem.arg.init") ||
+                     f_callee->getName().equals("shadow.mem.init")))
       return;
   }
   // add the constraints after processing all shadow.mem.arg.init and
@@ -2186,10 +2185,11 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side, SymSto
     }
   }
 
-  for(auto kv: nkm) {
+  for (auto kv : nkm) {
     Expr memE = getExprNode(nim, *kv.first);
     assert(kv.second.size() > 0); // more than one key
-    side.push_back(finite_map::constraintKeys(memE, kv.second));
+    side.push_back(finite_map::constrainKeys(
+        memE, kv.second)); // TODO: change by definition
     // TODO: complete the constraints with fresh consts if the finite map has
     // more than found through globals
     LOG("fmaps_mem_init", errs() << *side.back() << "\n");
