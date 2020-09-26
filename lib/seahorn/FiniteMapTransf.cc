@@ -249,6 +249,7 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
   if (!isOpX<CONST_FINITE_MAP>(mr)) {
     if (bind::isFiniteMapConst(mr)) { // if variable, use its expansion
       if (fmei.m_fmapDefk.count(mr) == 0) {
+        assert(false); // we don't want this, everything has to be already defined
         // if no expansion is found, create a finite map with fresh consts
         mr = mkEmptyConstMap(mr, fmei);
         mrDefk = finite_map::fmapDefKeys(mr);
@@ -266,9 +267,17 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
   assert(isOpX<CONST_FINITE_MAP_KEYS>(mrDefk));
 
   if (bind::isFiniteMapConst(ml)) {
-    if (fmei.m_fmapDefk.count(ml) == 0) { // first appearance
-      ml = mkEmptyConstMap(ml, fmei);
-      mlDefk = finite_map::fmapDefKeys(ml);
+    if (fmei.m_fmapVarTransf.count(ml) == 0) { // first appearance of the const
+      // reduce to true equalities when the left hand side is a variable and it
+      // appeared for the first time, to use the right hand side whenever the
+      // left variable appears store map definition and transform to true
+      //
+      // this optimization can only be done if the are in the same scope
+      fmei.m_fmapDefk[ml] = mrDefk;
+      fmei.m_type[ml] = fmei.m_type[mr];
+      fmei.m_typeLmd[ml] = fmei.m_typeLmd[mr];
+      fmei.m_fmapVarTransf[ml] = mr;
+      return mk<TRUE>(fmei.m_efac);
     } else {
       mlDefk = fmei.m_fmapDefk[ml];
       ml = fmei.m_fmapVarTransf[ml];
