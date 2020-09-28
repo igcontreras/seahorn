@@ -249,10 +249,8 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
         errs() << "in " << *ml << " = " << *mr << "\n"
                << "undefined fmap " << *mr->left();
         assert(false && "undefined fmap");
-        mr = mkEmptyConstMap(mr,fmei);
-        mrDefk = finite_map::fmapDefValues(mr);
-        // assert(false && "undefined fmap");
-        // return mk<EQ>(ml, mr);
+        return mk<EQ>(ml, mr);
+
       } else { // already expanded const
         mrDefk = fmei.m_fmapDefk[mr];
         mr = fmei.m_fmapVarTransf[mr];
@@ -273,6 +271,11 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
       // left variable appears store map definition and transform to true
       //
       // this optimization can only be done if the are in the same scope
+      if (fmei.m_dimpl == 0) {
+        errs() << "equality inside of an implication" << *ml << " = " << *mr
+               << "\n";
+        return mk<EQ>(ml, mr);
+      }
       fmei.m_fmapDefk[ml] = mrDefk;
       fmei.m_type[ml] = fmei.m_type[mr];
       fmei.m_typeLmd[ml] = fmei.m_typeLmd[mr];
@@ -354,14 +357,15 @@ static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
 
   LOG("fmap_transf", errs() << "-- mkGetCore " << *map << " " << *key << "\n";);
 
-  if (fmei.m_typeLmd.count(map) == 0) {
-    assert(bind::isFiniteMapConst(map));
-    mkEmptyConstMap(map, fmei);
-  }
-  Expr pos =
-      fmei.m_zsimp.simplify(finite_map::mkGetPosKey(fmei.m_typeLmd[map], key));
+  // if (fmei.m_typeLmd.count(map) == 0) {
+  //   assert(bind::isFiniteMapConst(map));
+  //   mkEmptyConstMap(map, fmei);
+  // }
 
   map = mkFMapPrimitiveArgCore(map, fmei);
+
+  Expr pos =
+      fmei.m_zsimp.simplify(finite_map::mkGetPosKey(fmei.m_typeLmd[map], key));
 
   return fmei.m_zsimp.simplify(finite_map::mkGetValPos(map, pos));
 }
@@ -374,11 +378,14 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
 
   Expr lmdKeys;
   if (fmei.m_typeLmd.count(map) == 0) {
-    assert(bind::isFiniteMapConst(map));
-    mkEmptyConstMap(map, fmei);
+    return finite_map::set(map, key, value);
+    // assert(bind::isFiniteMapConst(map));
+    // mkEmptyConstMap(map, fmei);
   }
   lmdKeys = fmei.m_typeLmd[map];
-  assert(lmdKeys);
+  // assert(lmdKeys);
+
+  map = mkFMapPrimitiveArgCore(map, fmei);
 
   Expr procMap = mkFMapPrimitiveArgCore(map, fmei);
 
@@ -430,7 +437,7 @@ static Expr mkIteCore(Expr ite, FMapExprsInfo &fmei) {
 
   /// -- we can use the `th` or the `el`
   Expr defkth = fmei.m_fmapDefk[th];
-  Expr defkel = fmei.m_fmapDefk[th];
+  // Expr defkel = fmei.m_fmapDefk[th];
 
   Expr ty = fmei.m_type[th];
   Expr lmdKeys = fmei.m_typeLmd[th];
@@ -438,15 +445,15 @@ static Expr mkIteCore(Expr ite, FMapExprsInfo &fmei) {
   th = mkFMapPrimitiveArgCore(th, fmei);
   el = mkFMapPrimitiveArgCore(el, fmei);
 
-  if (defkth != defkel) { // replace the keys in `el` by the keys in `th`
-    ExprMap rmap;
-    auto th_it = defkth->args_begin();
-    auto el_it = defkel->args_begin();
-    for (; th_it != defkth->args_end(); th_it++, el_it++)
-      rmap[*el_it] = *th_it;
+  // if (defkth != defkel) { // replace the keys in `el` by the keys in `th`
+  //   ExprMap rmap;
+  //   auto th_it = defkth->args_begin();
+  //   auto el_it = defkel->args_begin();
+  //   for (; th_it != defkth->args_end(); th_it++, el_it++)
+  //     rmap[*el_it] = *th_it;
 
-    el = replace(el, rmap);
-  }
+  //   el = replace(el, rmap);
+  // }
 
   Expr x = bind::mkConst(mkTerm<std::string>("x", fmei.m_efac),
                          sort::finiteMapValTy(ty));
@@ -481,6 +488,8 @@ Expr FiniteMapBodyRewriter::operator()(Expr exp) {
     res = mkIteCore(exp, m_fmei);
   } else if (isOpX<EQ>(exp)) {
     res = mkEqCore(exp->left(), exp->right(), m_fmei);
+  } else if (isOpX<IMPL>(exp)) {
+    m_fmei.m_dimpl--;
   } else if (isOpX<SAME_KEYS>(exp)) {
     res = mkSameKeysCore(exp->left(), exp->right(), m_fmei);
   } else { // do nothing
@@ -508,6 +517,8 @@ VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
     return VisitAction::changeDoKidsRewrite(exp, m_rw);
   else if (bind::IsConst()(exp) || bind::isFdecl(exp))
     return VisitAction::skipKids();
+  else if (isOpX<IMPL>(exp))
+    m_dimpl++;
 
   return VisitAction::doKids();
 }
