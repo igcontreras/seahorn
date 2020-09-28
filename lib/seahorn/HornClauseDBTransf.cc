@@ -168,6 +168,8 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb,
     DagVisitCache dvc;
     FiniteMapBodyVisitor fmv(allVars, efac, zsimp);
 
+    LOG("print_fmap_body_clauses", errs() << *rule.get() << "\n\n";);
+
     Expr body = visit(fmv, rule.body(), dvc);
 
     ExprSet newVars;
@@ -186,7 +188,6 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb,
         if (tc.typeOf(newRule.get()) == sort::errorTy(efac)) {
           errs() << *tc.getErrorExp() << "\n";
         });
-    LOG("print_fmap_body_clauses", errs() << *rule.get() << "\n\n";);
 
     tdb.removeRule(rule);
     tdb.addRule(newRule);

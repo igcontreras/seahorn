@@ -828,6 +828,14 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
     side(mk<GT>(lhs, zeroE));
   }
 
+  // TODO: which is the right place to put these functions? I also need them in the UfoOpSem
+  static bool returnsArray(Expr e) {
+    if (isOpX<ITE>(e))
+      return returnsArray(e->right());
+    else
+      return bind::isArrayConst(e) || isOpX<STORE>(e);
+  }
+
   void visitLoadInst(LoadInst &I) {
     if (InferMemSafety) {
       Value *pop = I.getPointerOperand()->stripPointerCasts();
@@ -860,10 +868,11 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         side(lhs, rhs);
     } else if (Expr op0 = lookup(*I.getPointerOperand())) {
       Expr rhs = nullptr;
-      if (bind::isArrayConst(m_inMem))
+      if (returnsArray(m_inMem))
         rhs = op::array::select(m_inMem, op0);
-      else
+      else if (finite_map::returnsFiniteMap(m_inMem)) {
         rhs = op::finite_map::get(m_inMem, op0);
+      }
 
       if (I.getType()->isIntegerTy(1))
         // -- convert to Boolean
@@ -902,9 +911,10 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       Expr idx = lookup(*I.getPointerOperand());
       if (idx && v) {
         Expr store;
-        if (bind::isFiniteMapConst(m_inMem))
+        if (finite_map::returnsFiniteMap(m_inMem))
           store = op::finite_map::set(m_inMem, idx, v);
         else {
+          assert(returnsArray(m_inMem));
           store = op::array::store(m_inMem, idx, v);
         }
         side(m_outMem, store, !ArrayGlobalConstraints);
@@ -1848,9 +1858,9 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
         const Node *nextN = m_exprCell[nextParam].first;
         if (n == nextN) {
           // -- add memOut = memIn
-          side.push_back(mk<EQ>(param, nextParam));
+          side.push_back(mk<EQ>(nextParam, param)); // for efficient transformation
           LOG("fmap_opsem",
-              errs() << "new unif" << *mk<EQ>(param, nextParam) << "\n";
+              errs() << "new unif" << *mk<EQ>(nextParam, param) << "\n";
               errs() << "fresh const " << *nextParam << " : replaced by \n "
                      << "\t" << *csi.m_fparams[i + 1] << "\n";);
           i++;
@@ -1869,6 +1879,9 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   assert(csi.m_fparams.size() == bind::domainSz(fi.sumPred));
   assert(checkArgs(bind::fapp(fi.sumPred, csi.m_fparams)));
   side.push_back(bind::fapp(fi.sumPred, csi.m_fparams));
+
+  // TODO: it is more efficient if the definitions appear before the callsite,
+  // at least for the IN case
 
   ExprMap extraDefs;
   // store back in caller variables
@@ -1917,7 +1930,8 @@ void FMapUfoOpSem::recAddSortedDef(const Expr map, const Expr def,
 
   for (auto m_it : deps) {
     auto d_it = defs.find(map);
-    assert(d_it != defs.end());
+    if (d_it != defs.end()) // defined earlier
+      continue;
     recAddSortedDef(m_it, d_it->second, defs, added, side);
   }
   side.push_back(def);
@@ -2010,9 +2024,10 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
 // \brief obtains the value of an offset of an expr that represents a memory
 // region (looking at the type)
 Expr FMapUfoOpSem::memObtainValue(Expr mem, Expr offset) {
-  if (bind::isArrayConst(mem) || isOpX<STORE>(mem))
+
+  if (OpSemVisitor::returnsArray(mem))
     return op::array::select(mem, offset);
-  else if (bind::isFiniteMapConst(mem) || isOpX<SET>(mem))
+  else if (finite_map::returnsFiniteMap(mem))
     return op::finite_map::get(mem, offset);
   else // mem represented as scalar
     return mem;
@@ -2021,9 +2036,10 @@ Expr FMapUfoOpSem::memObtainValue(Expr mem, Expr offset) {
 // \brief stores a value in an offset of an expr that represents a memory
 // region (looking at the type)
 Expr FMapUfoOpSem::memSetValue(Expr mem, Expr offset, Expr v) {
-  if (bind::isArrayConst(mem) || isOpX<STORE>(mem))
+
+  if (OpSemVisitor::returnsArray(mem))
     return op::array::store(mem, offset, v);
-  else if (bind::isFiniteMapConst(mem) || isOpX<SET>(mem))
+  else if (finite_map::returnsFiniteMap(mem))
     return op::finite_map::set(mem, offset, v);
   else {
     assert(false && "unexpected copy to scalar");

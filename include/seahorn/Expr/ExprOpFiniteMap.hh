@@ -212,6 +212,15 @@ inline Expr constrainKeys(Expr map, const Range &keys) {
   return mk<SAME_KEYS>(map, constFiniteMapKeys(keys));
 }
 
+// TODO: inline a recursive function?
+inline bool returnsFiniteMap(const Expr e) {
+  if (isOpX<ITE>(e))
+    return returnsFiniteMap(e->right());
+  else
+    return bind::isFiniteMapConst(e) || isOpX<SET>(e) ||
+           isOpX<CONST_FINITE_MAP>(e);
+}
+
 // --------------- transformation to lambda functions ------------------------
 // \brief the empty map is just the default value `defaultV`
 inline Expr mkEmptyMap(Expr defaultV) { return defaultV; }
@@ -234,7 +243,7 @@ inline Expr mkKeys(const Range &keys, ExprFactory &efac) {
   unsigned count = 1;
   // this loop creates a lambda term for the keys. The lambda term is of the
   // form: l1 x.(ite x == k1 1 0)
-  //       ln x.(ite x == kn n (ln-1 x))
+  //       ln x.(ite x == kn n (ite x == kn-1 n-1 (ite x == kn-2 n-2 ...)))
   //
   // the lambda function returns the position of the value corresponding to a
   // key in the lambda term that represents the values
@@ -266,7 +275,7 @@ inline Expr mkKeys(const Range &keys, const Expr base, const Expr kTy,
 // \brief creates a map for keys and values, assuming that they are sorted
 template <typename Range>
 inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
-                             Expr defaultV, const Expr lmdKeys) {
+                             Expr defaultV) {
 
   ExprFactory &efac = vTy->efac();
   assert(bind::typeOf(defaultV) == vTy);
