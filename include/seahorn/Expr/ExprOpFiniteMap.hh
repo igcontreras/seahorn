@@ -274,28 +274,41 @@ inline Expr mkKeys(const Range &keys, const Expr base, const Expr kTy,
 
 // \brief creates a map for keys and values, assuming that they are sorted
 template <typename Range>
-inline Expr mkInitializedMap(const Range &keys, Expr vTy, const Range &values,
+inline Expr mkInitializedMap(const Range &keys, Expr kTy, const Range &values,
                              Expr defaultV) {
 
-  ExprFactory &efac = vTy->efac();
-  assert(bind::typeOf(defaultV) == vTy);
-  // assuming that there is a value for every key. If this is not available,
-  // "initialize" it with the default value for uninitialized memory
-
-  Expr y = bind::mkConst(mkTerm<std::string>("y", efac), vTy);
+  ExprFactory &efac = kTy->efac();
+  Expr y = bind::mkConst(mkTerm<std::string>("y", efac), kTy);
   // internal variable for the values lambda term, it must be of the value kind
 
-  // assuming that mkKeys assigns the position in the map starting at 1
-  unsigned count = 1;
-
-  Expr lmdMap = defaultV;
   // we create lmd expressions for the map values of the form:
   //
-  // l1 x.(ite (x == 1) v1 defaultV)
+  // l1 x.(v1)
   // ln x.(ite (x == n) vn (ln-1 x))
-  for (auto v : values)
-    lmdMap =
-        boolop::lite(mk<EQ>(y, mkTerm<mpz_class>(count++, efac)), v, lmdMap);
+  // for (auto v : values)
+  //   lmdMap =
+  //       boolop::lite(mk<EQ>(y, mkTerm<mpz_class>(count++, efac)), v, lmdMap);
+
+  // auto v_it = values.begin();
+  // auto k_it = keys.begin();
+
+  // Expr lmdMap = *v_it;
+  // v_it++;
+  // k_it++;
+  // for ( ; k_it!= keys.end() ; k_it++, v_it++) {
+  //   lmdMap = boolop::lite(mk<EQ>(y, *k_it), *v_it, lmdMap);
+  // }
+
+  auto v_it = --values.end();
+  auto k_it = --keys.end();
+
+  Expr lmdMap = *v_it;
+  for ( ; k_it!= keys.begin() ; k_it--, v_it--) {
+    lmdMap = boolop::lite(mk<EQ>(y, *k_it), *v_it, lmdMap);
+  }
+
+  // first element -> TODO: change prev loop condition
+  lmdMap = boolop::lite(mk<EQ>(y, *k_it), *v_it, lmdMap);
 
   return bind::abs<LAMBDA>(std::array<Expr, 1>{y}, lmdMap);
 }
@@ -314,6 +327,15 @@ inline Expr mkGetVal(Expr lmdMap, Expr lmdKeys, Expr key) {
   return op::bind::betaReduce(lmdMap, op::bind::betaReduce(lmdKeys, key));
 }
 
+inline Expr mkGetVal(Expr lmdMap, Expr key) {
+
+  // lmdMap may be a lambda or a const.
+  if (isOpX<LAMBDA>(lmdMap))
+    return op::bind::fapp(lmdMap, key);
+  else
+    return lmdMap;
+}
+
 inline Expr mkGetPosKey(Expr lmdKeys, Expr key) {
 
   // assert(isOpX<LAMBDA>(lmdKeys));
@@ -327,31 +349,44 @@ inline Expr mkGetPosKey(Expr lmdKeys, Expr key) {
 // already know, i.e., the keys lambda term has been resolved
 inline Expr mkGetValPos(Expr lmdMap, Expr pos) {
 
-  // return op::bind::betaReduce(lmdMap, pos);
-  return op::bind::fapp(lmdMap, pos);
+  if (isOpX<LAMBDA>(lmdMap))
+    // return op::bind::betaReduce(lmdMap, pos);
+    return op::bind::fapp(lmdMap, pos);
+  else // ground term
+    return lmdMap;
 }
 
-/// \brief Constructs set expression. Non-simplifying. None of the parameters
-/// should contain map terms, they should be expanded to lambdas
-//      `lmdMap` contains the values of the map as a lambda term
-//      `lmdKeys` represents the keys of the map as a lambda term
-inline Expr mkSetVal(Expr lmdMap, Expr lmdKeys, Expr key, Expr value) {
+// /// \brief Constructs set expression. Non-simplifying. None of the parameters
+// /// should contain map terms, they should be expanded to lambdas
+// //      `lmdMap` contains the values of the map as a lambda term
+// //      `lmdKeys` represents the keys of the map as a lambda term
+// inline Expr mkSetVal(Expr lmdMap, Expr lmdKeys, Expr key, Expr value) {
 
-  // lmdMap may be a lambda or the default value: a number or a const.
-  assert(isOpX<LAMBDA>(lmdKeys));
-  assert(isOpX<FDECL>(lmdKeys->arg(0)));
+//   // lmdMap may be a lambda or the default value: a number or a const.
+//   assert(isOpX<LAMBDA>(lmdKeys));
+//   assert(isOpX<FDECL>(lmdKeys->arg(0)));
 
-  Expr kTy = bind::rangeTy(lmdKeys->arg(0));
-  Expr x = bind::intConst(mkTerm<std::string>("x", lmdMap->efac()));
-  // this internal variable is an integer because we represent the positions of
-  // the keys in the map with integers
+//   Expr kTy = bind::rangeTy(lmdKeys->arg(0));
+//   Expr x = bind::intConst(mkTerm<std::string>("x", lmdMap->efac()));
+//   // this internal variable is an integer because we represent the positions
+//   of
+//   // the keys in the map with integers
 
-  Expr keyToPos = op::bind::betaReduce(lmdKeys, key);
-  // keyToPos is the position in which the value for key: lmdKeys(key)
-  Expr cmp = mk<EQ>(x, keyToPos);
-  Expr ite = boolop::lite(cmp, value, bind::betaReduce(lmdMap, x));
+//   Expr keyToPos = op::bind::betaReduce(lmdKeys, key);
+//   // keyToPos is the position in which the value for key: lmdKeys(key)
+//   Expr cmp = mk<EQ>(x, keyToPos);
+//   Expr ite = boolop::lite(cmp, value, bind::betaReduce(lmdMap, x));
 
-  // lx.(ite ((lmdKeys key) == x) value (lmdMap x))
+//   // lx.(ite ((lmdKeys key) == x) value (lmdMap x))
+//   return bind::abs<LAMBDA>(std::array<Expr, 1>{x}, ite);
+// }
+
+inline Expr mkSetVal(Expr lmdMap, Expr key, Expr kTy, Expr value) {
+
+  Expr x = bind::mkConst(mkTerm<std::string>("x", lmdMap->efac()), kTy);
+  Expr ite = boolop::lite(mk<EQ>(x, key), value, bind::betaReduce(lmdMap, x));
+
+  // lx.(ite ( (key == x) value (lmdMap x))
   return bind::abs<LAMBDA>(std::array<Expr, 1>{x}, ite);
 }
 

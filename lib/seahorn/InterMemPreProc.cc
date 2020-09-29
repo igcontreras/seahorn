@@ -8,10 +8,10 @@
 #include "seadsa/DsaAnalysis.hh"
 #include "seadsa/Global.hh"
 
-static llvm::cl::opt<unsigned> MaxKeys(
-    "horn-fmap-max-keys",
-    llvm::cl::desc("Maximum number of different keys allowed in a finite map"),
-    cl::init(1));
+namespace seahorn {
+// flag for the maximum size of an fmap
+extern unsigned FmapsMaxKeys;
+}
 
 namespace {
 
@@ -127,7 +127,8 @@ static void computeSafeNodesSimulation(Graph &fromG, const Function &F,
   // return cell
   if (fromG.hasRetCell(F)) {
     Cell &c = fromG.getRetCell(F);
-    checkExploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
+    if(c.getNode()->isModified())
+      checkExploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
   }
 
   // ei.m_explColor has the nodes explored
@@ -197,16 +198,18 @@ bool InterMemPreProc::runOnModule(Module &M) {
                                    safeCallee, safeCaller, simMap);
 
         // remove from safe the ones that are not CI safe because of the threshold
-        NodeSet &safeCI = getUnsafeNodes(f_callee);
-        SimulationMapper &smSAS = m_smF[f_callee];
+        // NodeSet &safeCI = getUnsafeNodes(f_callee);
+        // SimulationMapper &smSAS = m_smF[f_callee];
 
-        for (auto n : safeCallee){
-          const Node * nSAS = smSAS.get(*n).getNode();
-          if (!isSafeNode(safeCI, nSAS)){
-            safeCallee.erase(n); // TODO: ????
-            safeCaller.erase(simMap.get(*n).getNode());
-          }
-        }
+        // for (auto n : safeCallee){
+        //   const Node * nSAS = smSAS.get(*n).getNode();
+        //   if (!isSafeNode(safeCI, nSAS)){
+        //     safeCallee.erase(n); // TODO: ????
+        //     // errs() << "removing safe"
+        //     //        << *simMap.get(*n).getNode() << "\n";
+        //     safeCaller.erase(simMap.get(*n).getNode());
+        //   }
+        // }
       }
     }
   }
@@ -273,11 +276,11 @@ void InterMemPreProc::runOnFunction(const Function *F) {
 
   // -- remove the nodes that would be encoded with finite maps bigger than the
   // threshold
-  for (auto kv : rm)
-    if(kv.second > MaxKeys){
-      kv.second = 0; // TODO: does this work?
-      safeSAS.erase(kv.first); // remove a safe to be used for the CS safe nodes
-    }
+  // for (auto kv : rm)
+  //   if(kv.second > FmapsMaxKeys){
+  //     kv.second = 0; // TODO: does this work?
+  //     safeSAS.erase(kv.first); // remove a safe to be used for the CS safe nodes
+  //   }
 
 }
 

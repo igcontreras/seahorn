@@ -232,6 +232,8 @@ private:
   using ExprCellMap = std::map<Expr, std::pair<const seadsa::Node *, unsigned>>;
   ExprCellMap m_exprCell;
 
+  using CellSet = DenseSet<std::pair<const seadsa::Node *, unsigned>>;
+
   // -- constant base for keys
   Expr m_keyBase;
   // -- default value for uninitialized values of maps
@@ -246,13 +248,13 @@ private:
   using FunctionNodeIdMap = std::map<const Function *, NodeIdMap>;
   FunctionNodeIdMap m_fInitSymNodes;
 
-  void VCgenArg(const Cell &cArgCallee, Expr basePtr,
-                const NodeSet &unsafeCallerNodes, SimulationMapper &sm,
-                const Function &F);
+  void VCgenCell(const Cell &cArgCallee, Expr basePtr,
+                 const NodeSet &unsafeCallerNodes, SimulationMapper &sm,
+                 const Function &F);
 
   void recVCGenMem(const Cell &c_callee, Expr ptrInt, Expr ptrOut,
-                   const NodeSet &unsafeNodes, SimulationMapper &simMap,
-                   const Function &F);
+                   const NodeSet &unsafeNodes, CellSet &explored,
+                   SimulationMapper &simMap, const Function &F);
 
   Expr fmVariant(Expr e, const ExprVector &keys);
   void addKeyVal(Cell c, Expr basePtr, Expr offset, MemOpt ao);
@@ -273,7 +275,7 @@ private:
                                      SymStore &s);
 
   void recAddSortedDef(const Expr map, const Expr def, const ExprMap &defs,
-                  ExprSet &added, ExprVector &side);
+                       ExprSet &added, ExprVector &side);
   void storeSymInitInstruction(Instruction *I, NodeIdMap &nim, Expr memE);
 
   bool processedNodeKeysFunction(const Function &F) {
@@ -289,6 +291,13 @@ private:
   NodeIdMap &getNodeSymFunction(const Function &F) {
     return m_fInitSymNodes[&F]; // creates it if it
                                 // doesn't exist
+  }
+
+  bool containsCell(const CellSet &cs, const Cell &c) {
+    return cs.count({c.getNode(), getOffset(c)}) > 0;
+  }
+  void addCell(CellSet &cs, const Cell &c) {
+    cs.insert({c.getNode(), getOffset(c)});
   }
 };
 
