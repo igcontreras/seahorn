@@ -1567,7 +1567,7 @@ void MemUfoOpSem::recVCGenMem(const Cell &c_callee, Expr ptr,
 // -- returns true of the cell is encoded with a scalar
 bool MemUfoOpSem::isMemScalar(const Cell &c) {
 
-  if(!EnableUniqueScalars)
+  if (!EnableUniqueScalars)
     return false;
 
   Expr memE;
@@ -1580,7 +1580,8 @@ bool MemUfoOpSem::isMemScalar(const Cell &c) {
     return false;
   }
 
-  return !(OpSemVisitor::returnsArray(memE) || finite_map::returnsFiniteMap(memE));
+  return !(OpSemVisitor::returnsArray(memE) ||
+           finite_map::returnsFiniteMap(memE));
 }
 
 bool MemUfoOpSem::hasExprNode(const NodeIdMap &nim, const Cell &c) {
@@ -1703,25 +1704,17 @@ Expr FMapUfoOpSem::symb(const Value &I) {
           const Node &n = *const_cast<Node *>(opt_c.getValue().getNode());
 
           if (m_preproc->isSafeNode(m_preproc->getUnsafeNodes(F), &n)) {
-            unsigned nKs =
-                m_preproc->getNumAccesses(&n, F); // this should be by cell
+            unsigned nKs = m_preproc->getNumAccesses(&n, F);
 
             if (nKs > 0 && nKs <= MaxKeys) { // may be safe but not accessed
               Expr v = mkTerm<const Value *>(&I, m_efac); // same name as array
                                                           // but different sort
-              ExprVector keys(nKs);
-              auto ks_it = keys.begin();
-
-              for (int i = 0; i < nKs; i++, ks_it++)
-                *ks_it = bind::intConst(variant::variant(i, m_keyBase));
-
-              Expr intTy =
-                  sort::intTy(m_efac); // intTy  is hardwired in UfoOpSem
+              ExprVector &keys = m_preproc->getKeys(&n, F);
+              Expr intTy = sort::intTy(m_efac);
               LOG("fmap_symb", errs() << *v << ": "
                                       << *sort::finiteMapTy(intTy, keys)
                                       << "\nnode:";
                   n.dump());
-
               return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
             }
           }
@@ -1733,9 +1726,23 @@ Expr FMapUfoOpSem::symb(const Value &I) {
         }
       }
     }
-  }
+  } //  else if (const Instruction *i = dyn_cast<const Instruction>(&I)) {
+  //   const Function *F = i->getParent()->getParent();
+  //   GlobalAnalysis &ga = m_shadowDsa->getDsaAnalysis();
+  //   if (ga.hasGraph(*F)) {
+  //     Graph &g = ga.getGraph(*F);
+  //     if (g.hasCell(I)) {
+  //       const Cell& c = g.getCell(I);
+  //       llvm::Optional<unsigned> opt_cellId =
+  //           m_shadowDsa->getCellId(c);
+  //       assert(opt_cellId.hasValue());
+  //       return finite_map::tagCell(UfoOpSem::symb(I), opt_cellId.getValue(),
+  //                                  c.getRawOffset());
+  //     }
+  //   }
+  // }
   return UfoOpSem::symb(I);
-}
+} // namespace seahorn
 
 // for debugging
 static bool checkArgs(Expr fapp) {
@@ -1828,6 +1835,8 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     }
   }
 
+  ExprVector copies; // copies are not directly added to `side` because we want
+                     // them to be active only if the function is
   for (int i = 3; i < csi.m_fparams.size(); i++) {
     Expr param = csi.m_fparams[i];
     if (hasExprKeys(param)) { // parameter that is copied
@@ -1854,24 +1863,15 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       // -- create a fresh array (not reachable in the callee bu)
       csi.m_fparams[i] =
           bind::mkConst(variant::variant(0, param), fi.sumPred->arg(i + 1));
-      LOG("fmap_opsem", errs() << "fresh const " << *param->left()
-                               << " : replaced by \n "
-                               << "\t" << *csi.m_fparams[i] << "\n";);
-
       if (i < csi.m_fparams.size()) {
         Expr nextParam = csi.m_fparams[i + 1];
         if (m_exprCell[param].first == m_exprCell[nextParam].first) {
           // -- add memOut = memIn (not accessed in this function)
-          side.push_back(mk<EQ>(nextParam, param));
+          copies.push_back(mk<EQ>(nextParam, param));
           i++;
           assert(isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)));
           csi.m_fparams[i] = bind::mkConst(variant::variant(0, nextParam),
                                            fi.sumPred->arg(i + 1));
-          LOG("fmap_opsem",
-              errs() << "new unif" << *mk<EQ>(nextParam, param) << "\n";
-              errs() << "fresh const " << *nextParam << " : replaced by \n "
-                     << "\t" << *csi.m_fparams[i] << "\n";);
-
         }
       }
     }
@@ -1890,25 +1890,35 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   side.push_back(bind::fapp(fi.sumPred, csi.m_fparams));
 
   ExprMap extraDefs;
+  ExprVector arrayStores;
+
   // store back in caller variables
   for (auto kv : m_replace) {
     Expr param = kv.first;
     Expr fmap = kv.second;
-    if (m_fmOut.count(param) > 0) // if it is an output mem symbol
-      extraDefs[fmap] =
-          mk<AND>(finite_map::constrainKeys(kv.second, getExprKeys(param)),
-                  mk<EQ>(param, m_fmOut[param]));
-    else
+    if (m_fmOut.count(param) > 0) { // if it is an output mem symbol
+      Expr ks = finite_map::constrainKeys(kv.second, getExprKeys(param));
+      Expr store = mk<EQ>(param, m_fmOut[param]);
+      if (OpSemVisitor::returnsArray(param)) {
+        arrayStores.push_back(store);
+        extraDefs[fmap] = ks;
+      } else
+        extraDefs[fmap] = mk<AND>(ks, store);
+    } else
       extraDefs[fmap] = mk<EQ>(
           fmap, finite_map::constFiniteMap(getExprKeys(param), m_fmapDefault,
                                            getExprValues(param)));
   }
 
   // add definitions in an ordered way
-  ExprSet added; // stores the definitions already addded
+  ExprSet added; // stores the definitions already added
+
   for (auto kv : extraDefs) {
     recAddSortedDef(kv.first, kv.second, extraDefs, added, side);
   }
+
+  if (copies.size() > 0)
+    side.push_back(boolop::limp(csi.m_fparams[0], boolop::land(copies)));
 
   // reset for the next callsite
   m_orig_array_in.clear();
@@ -1958,7 +1968,7 @@ void FMapUfoOpSem::VCgenCell(const Cell &cArgCallee, Expr basePtr,
                              const NodeSet &unsafeNodesCaller,
                              SimulationMapper &sm, const Function &F) {
 
-  CellSet explored;
+  CellSet explored; // TODO: remove, not used
   recVCGenMem(cArgCallee, basePtr, basePtr, unsafeNodesCaller, explored, sm, F);
 }
 
@@ -1967,10 +1977,8 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
                                CellSet &explored, SimulationMapper &simMap,
                                const Function &F) {
 
-  // if(containsCell(explored, c_callee))
-  //   return;
-
-  // addCell(explored, c_callee);
+  if (c_callee.getNode()->types().empty())
+    return;
 
   assert(!bind::isArrayConst(basePtrOut) &&
          !bind::isFiniteMapConst(basePtrOut));
@@ -1981,7 +1989,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &c_callee, Expr basePtrIn,
   const Cell &c_caller = simMap.get(c_callee);
   const Node *n_caller = c_caller.getNode();
 
-  if (!m_preproc->isSafeNode(unsafeNodes, n_caller) || c_callee.getNode()->types().empty())
+  if (!m_preproc->isSafeNode(unsafeNodes, n_caller))
     return;
 
   if (m_preproc->getNumCIAccessesCellSummary(c_callee, &F) <= MaxKeys) {
@@ -2056,6 +2064,7 @@ Expr FMapUfoOpSem::memObtainValue(Expr mem, Expr offset) {
 Expr FMapUfoOpSem::memSetValue(Expr mem, Expr offset, Expr v) {
 
   if (OpSemVisitor::returnsArray(mem))
+    // TODO: a = ite(old == new, a, store(a, idx, new)
     return op::array::store(mem, offset, v);
   else if (finite_map::returnsFiniteMap(mem))
     return op::finite_map::set(mem, offset, v);
@@ -2114,14 +2123,7 @@ Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee,
   Expr origE = getOrigMemSymbol(cCaller, ao);
 
   if (m_replace.count(origE) == 0) { // not copied yet
-    unsigned nKs = m_preproc->getNumCIAccessesCellSummary(cCallee, &F);
-
-    ExprVector keys(nKs);
-    auto key_it = keys.begin();
-    for (int i = 0; i < nKs; i++, key_it++)
-      *key_it = bind::intConst(variant::variant(i, m_keyBase));
-
-    Expr newE = fmVariant(origE, keys);
+    Expr newE = fmVariant(origE, m_preproc->getKeysCellSummary(cCallee, &F));
     m_replace[origE] = newE;
     return newE;
   } else
@@ -2194,7 +2196,6 @@ void FMapUfoOpSem::storeSymInitInstruction(Instruction *I, NodeIdMap &nim,
   auto opt_c = m_shadowDsa->getShadowMemCell(*ci);
   assert(opt_c.hasValue());
   Cell &c = opt_c.getValue();
-  // assert(nim.count({c.getNode(), getOffset(c)}) == 0); // double init of node?
   nim.insert({{c.getNode(), getOffset(c)}, memE});
 }
 
@@ -2254,14 +2255,15 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
     }
   }
 
-  LOG("fmaps_mem_init", errs() << "--- adding inits for: " << F.getName() << "\n";);
+  LOG("fmaps_mem_init",
+      errs() << "--- adding inits for: " << F.getName() << "\n";);
   ExprMap defs;
   for (auto kv : nkm) {
     Expr memE = getExprNode(nim, *kv.first);
     assert(kv.second.size() > 0); // more than one key
     defs[memE] = finite_map::constrainKeys(memE, kv.second);
-    LOG("fmaps_mem_init", errs()
-        << "def: " << *memE << ": " << *defs[memE] << "\n";);
+    LOG("fmaps_mem_init",
+        errs() << "def: " << *memE << ": " << *defs[memE] << "\n";);
   }
 
   // add definitions in an ordered way
@@ -2269,7 +2271,8 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
   for (auto kv : defs) {
     recAddSortedDef(kv.first, kv.second, defs, added, side);
   }
-  LOG("fmaps_mem_init", errs() << "--- end inits for: " << F.getName() << "\n";);
+  LOG("fmaps_mem_init", errs()
+                            << "--- end inits for: " << F.getName() << "\n";);
 }
 
 void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
@@ -2278,10 +2281,14 @@ void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
                                            NodeKeysMap &nkm, NodeIdMap &nim) {
 
   const Node *nBU = cBU.getNode();
+
+  if (nBU->types().empty())
+    return;
+
   const Cell &cSAS = sm.get(cBU);
   const Node *nSAS = cSAS.getNode();
 
-  if (!m_preproc->isSafeNode(safeNs, nSAS) || cBU.getNode()->types().empty())
+  if (!m_preproc->isSafeNode(safeNs, nSAS))
     return;
 
   if (m_preproc->getNumAccesses(nSAS, &F) <= MaxKeys) {

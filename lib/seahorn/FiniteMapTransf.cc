@@ -3,6 +3,7 @@
 #include "seahorn/Expr/ExprCore.hh"
 #include "seahorn/Expr/ExprOpBind.hh"
 #include "seahorn/Expr/ExprOpFiniteMap.hh"
+#include "seahorn/Expr/ExprVisitor.hh"
 
 #include "seahorn/Support/SeaDebug.h"
 
@@ -16,7 +17,7 @@ namespace seahorn {
 
 static Expr mkVarKey(Expr mapConst, Expr k, Expr kTy) {
   assert(bind::isFiniteMapConst(mapConst));
-  return bind::mkConst(variant::tag(mapConst, k), kTy);
+  return bind::mkConst(variant::variant(0,variant::tag(mapConst, k)), kTy);
 }
 
 // -- creates a constant with the name get(map,k)
@@ -43,16 +44,26 @@ void mkVarsMap(Expr mapConst, Expr map, const Range &keys, int nKs, Expr kTy,
   auto v_it = map_values.begin(), k_it = map_keys.begin();
   Expr mapName = bind::name(bind::fname(mapConst));
 
-  for (auto k : keys) {
+  if (nKs == 1) {
+    Expr k = *keys.begin();
     key = mkVarKey(mapConst, k, kTy);
     *k_it++ = key;
     v = mkVarGet(mapConst, k, vTy);
     *v_it++ = v;
     evars.insert(v);
     evars.insert(key);
-    *newArg_it++ = key;
     *newArg_it++ = v;
-  }
+  } else
+    for (auto k : keys) {
+      key = mkVarKey(mapConst, k, kTy);
+      *k_it++ = key;
+      v = mkVarGet(mapConst, k, vTy);
+      *v_it++ = v;
+      evars.insert(v);
+      evars.insert(key);
+      *newArg_it++ = key;
+      *newArg_it++ = v;
+    }
   Expr defaultV = mkDefault(map_values.back(), vTy);
   evars.insert(defaultV);
 
@@ -354,6 +365,55 @@ static Expr mkDefFMapCore(Expr map, FMapExprsInfo &fmei) {
   return map;
 }
 
+// dsa-based ite simplifier
+class IteTopDownVisitor : public std::unary_function<Expr, VisitAction> {
+
+  ExprFactory &m_efac;
+  ZSimplifier<EZ3> &m_simp;
+
+  Expr getCellExprVariant(Expr e) {
+    assert(bind::IsConst()(e));
+
+    // assumes only 1 level of variance
+    Expr name = variant::mainVariant(bind::name(bind::fname(e)));
+    Expr cellE = variant::getTag(name);
+
+    if(!isOpX<CELL>(cellE)) // cell tags are included inside the key tag
+      cellE = variant::getTag(bind::name(bind::fname(cellE)));
+
+    assert(isOpX<CELL>(cellE));
+    return cellE; // cell id
+  }
+
+  Expr evalCondDsa(Expr cond) {
+    if (!bind::IsConst()(cond->left()) || !bind::IsConst()(cond->right()))
+      return cond;
+
+    Expr lcell = getCellExprVariant(cond->left());
+    Expr rcell = getCellExprVariant(cond->right());
+
+    if (lcell != rcell) // if they encode a different cell, return false
+      return mk<FALSE>(m_efac);
+    else
+      return cond;
+  }
+
+public:
+  IteTopDownVisitor(ExprFactory &efac, ZSimplifier<EZ3> &zsimp)
+      : m_efac(efac), m_simp(zsimp) {}
+
+  VisitAction operator()(Expr exp) {
+    if (isOpX<ITE>(exp) && isOpX<EQ>(exp->left())) { // EQ should always hold
+      Expr cond = evalCondDsa(exp->left());
+      return VisitAction::changeDoKids(
+          boolop::lite(cond, exp->arg(1), exp->arg(2)));
+    } else if (bind::IsConst()(exp) || bind::isFdecl(exp))
+      return VisitAction::skipKids();
+    else
+      return VisitAction::doKids();
+  }
+};
+
 // -- rewrites a map get primitive
 static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
 
@@ -365,7 +425,11 @@ static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
     return finite_map::get(map, key);
   }
   map = mkFMapPrimitiveArgCore(map, fmei);
-  return fmei.m_zsimp.simplify(finite_map::mkGetVal(map, key));
+  Expr v = fmei.m_zsimp.simplify(finite_map::mkGetVal(map, key));
+  // does eager simplification during beta reduction
+  // IteTopDownVisitor itdv(fmei.m_efac, fmei.m_zsimp);
+  // return visit(itdv, v); // TODO: use cache?
+  return v;
 }
 
 // -- rewrites a map set primitive
@@ -415,25 +479,25 @@ static Expr mkSameKeysCore(Expr lmap, Expr er, FMapExprsInfo &fmei) {
   assert(defl->arity() == defr->arity());
   ExprVector conj(defl->arity());
 
-  ExprMap repl;
+  // ExprMap repl;
 
   auto c_it = conj.begin();
   auto l_it = defl->args_begin();
   auto r_it = defr->args_begin();
   for (; l_it != defl->args_end(); c_it++, l_it++, r_it++) {
     *c_it = mk<EQ>(*l_it, *r_it);
-    repl[*l_it] = *r_it;
+    // repl[*l_it] = *r_it;
   }
 
-  if (conj.size() > 1)
-    if (fmei.m_fmapVarTransf.count(lmap) > 0) {
-      Expr expanded = fmei.m_fmapVarTransf[lmap];
-      Expr exprepl = replace(expanded, repl);
-      fmei.m_fmapVarTransf[lmap] = exprepl;
-      // fmei.m_fmapDefk[exprepl] = defr; // TODO: review this
-      // fmei.m_typeLmd[exprepl] = fmei.m_typeLmd[defr];
-      // fmei.m_type[exprepl] = fmei.m_type[defr];
-    }
+  // if (conj.size() > 1)
+  //   if (fmei.m_fmapVarTransf.count(lmap) > 0) {
+  //     Expr expanded = fmei.m_fmapVarTransf[lmap];
+  //     Expr exprepl = replace(expanded, repl);
+  //     fmei.m_fmapVarTransf[lmap] = exprepl;
+  //     // fmei.m_fmapDefk[exprepl] = defr; // TODO: review this
+  //     // fmei.m_typeLmd[exprepl] = fmei.m_typeLmd[defr];
+  //     // fmei.m_type[exprepl] = fmei.m_type[defr];
+  //   }
 
   return boolop::land(conj);
 }
@@ -515,7 +579,7 @@ VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
     return VisitAction::changeDoKidsRewrite(exp, m_rw);
   else if (bind::IsConst()(exp) || bind::isFdecl(exp))
     return VisitAction::skipKids();
-  else if (isOpX<IMPL>(exp)){
+  else if (isOpX<IMPL>(exp)) {
     m_dimpl++;
     // no rewritting necessary but we need to mark that we exited it
     return VisitAction::changeDoKidsRewrite(exp, m_rw);

@@ -9,6 +9,8 @@
 #include "seahorn/Expr/ExprOpSort.hh"
 #include "seahorn/Expr/ExprOpVariant.hh"
 
+#include "seahorn/Expr/ExprOpArray.hh"
+
 namespace expr {
 
 namespace op {

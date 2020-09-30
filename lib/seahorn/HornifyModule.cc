@@ -180,7 +180,8 @@ bool HornifyModule::runOnModule(Module &M) {
     CompleteCallGraph *ccg =
         getAnalysisIfAvailable<seadsa::CompleteCallGraph>();
     assert(ccg);
-    m_imPreProc = std::make_shared<InterMemPreProc>(*ccg, shadowmem_analysis);
+    m_imPreProc =
+        std::make_shared<InterMemPreProc>(*ccg, shadowmem_analysis, m_efac);
 
     m_imPreProc->runOnModule(M);
     if (InterProcMem)

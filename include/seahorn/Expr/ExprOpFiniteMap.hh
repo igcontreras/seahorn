@@ -3,10 +3,13 @@
 
 #include "seahorn/Expr/ExprApi.hh"
 #include "seahorn/Expr/ExprCore.hh"
+#include "seahorn/Expr/ExprOpBind.hh"
 #include "seahorn/Expr/ExprOpBinder.hh"
 #include "seahorn/Expr/ExprOpBool.hh"
-#include "seahorn/Expr/ExprOpCore.hh"
 #include "seahorn/Expr/TypeCheckerUtils.hh"
+
+#include "seahorn/Expr/ExprOpCompare.hh"
+#include "seahorn/Expr/ExprOpSort.hh"
 
 namespace expr {
 
@@ -18,7 +21,8 @@ enum class FiniteMapOpKind {
   CONST_FINITE_MAP,
   SET,
   GET,
-  SAME_KEYS
+  SAME_KEYS,
+  CELL
 };
 
 namespace typeCheck {
@@ -46,6 +50,9 @@ NOP(GET, "get", FUNCTIONAL, FiniteMapOp, typeCheck::finiteMapType::Get)
 NOP(SET, "set", FUNCTIONAL, FiniteMapOp, typeCheck::finiteMapType::Set)
 NOP(SAME_KEYS, "same-keys", FUNCTIONAL, FiniteMapOp,
     typeCheck::finiteMapType::FiniteMap) // TODO: type checking
+NOP(CELL, "cell", FUNCTIONAL, FiniteMapOp,
+    typeCheck::finiteMapType::FiniteMap) // TODO: no type checking needed, only
+                                         // for expressions
 
 namespace typeCheck {
 namespace finiteMapType {
@@ -303,7 +310,7 @@ inline Expr mkInitializedMap(const Range &keys, Expr kTy, const Range &values,
   auto k_it = --keys.end();
 
   Expr lmdMap = *v_it;
-  for ( ; k_it!= keys.begin() ; k_it--, v_it--) {
+  for (; k_it != keys.begin(); k_it--, v_it--) {
     lmdMap = boolop::lite(mk<EQ>(y, *k_it), *v_it, lmdMap);
   }
 
@@ -411,17 +418,20 @@ inline Expr mkMapsDecl(Expr fdecl) {
   Expr fname = bind::fname(fdecl);
 
   for (auto type : llvm::make_range(++fdecl->args_begin(), fdecl->args_end())) {
-    if (isOpX<FINITE_MAP_TY>(type)) { // the type is a FiniteMap
+    if (isOpX<FINITE_MAP_TY>(type)) {
       fmap_arg = true;
       Expr vTy = sort::finiteMapValTy(type);
       Expr ksTy = sort::finiteMapKeyTy(type);
       assert(ksTy->arity() > 0); // the map has at least one key
       auto ksIt = ksTy->args_begin();
       Expr kTy = bind::rangeTy(bind::fname(*ksIt)); // type of the key
-      for (; ksIt != ksTy->args_end(); ksIt++) {
-        newTypes.push_back(kTy); // new argument for key
-        newTypes.push_back(vTy); // new argument for value
-      }
+      if (ksTy->arity() == 1) {
+        newTypes.push_back(vTy); // do not include key
+      } else
+        for (; ksIt != ksTy->args_end(); ksIt++) {
+          newTypes.push_back(kTy); // new argument for key
+          newTypes.push_back(vTy); // new argument for value
+        }
     } else
       newTypes.push_back(type);
   }
@@ -429,6 +439,20 @@ inline Expr mkMapsDecl(Expr fdecl) {
   Expr newfname = bind::fapp(fdecl); // to go back easier, the new name
                                      // includes the old declaration
   return fmap_arg ? bind::fdecl(newfname, newTypes) : fdecl;
+}
+
+// ----------------------------------------------------------------------
+//  Cell tags
+// ----------------------------------------------------------------------
+
+inline Expr mkCellTag(unsigned id1, unsigned id2, ExprFactory &efac) {
+  return mk<CELL>(mkTerm<expr::mpz_class>(id1, efac),
+                  mkTerm<expr::mpz_class>(id2, efac));
+}
+
+inline Expr tagCell(Expr base, unsigned cellId, unsigned offset) {
+  Expr cellE = mkCellTag(cellId, offset, base->efac());
+  return bind::mkConst(variant::tag(base, cellE), bind::rangeTy(bind::fname(base)));
 }
 
 } // namespace finite_map

@@ -8,15 +8,22 @@
 #include "seadsa/DsaAnalysis.hh"
 #include "seadsa/Global.hh"
 
+#include "seahorn/Expr/ExprApi.hh"
+#include "seahorn/Expr/ExprOpBind.hh"
+#include "seahorn/Expr/ExprOpVariant.hh"
+#include "seahorn/Expr/ExprOpArray.hh"
+#include "seahorn/Expr/ExprOpFiniteMap.hh"
+
 namespace seahorn {
 // flag for the maximum size of an fmap
 extern unsigned FmapsMaxKeys;
-}
+} // namespace seahorn
 
 namespace {
 
 using namespace seadsa;
 using namespace llvm;
+using namespace expr;
 
 enum class EColor { BLACK, GRAY }; // colors for exploration
 using ExplorationMap = DenseMap<const Node *, EColor>;
@@ -127,7 +134,7 @@ static void computeSafeNodesSimulation(Graph &fromG, const Function &F,
   // return cell
   if (fromG.hasRetCell(F)) {
     Cell &c = fromG.getRetCell(F);
-    if(c.getNode()->isModified())
+    if (c.getNode()->isModified())
       checkExploreNode(*c.getNode(), *sm.get(c).getNode(), ei);
   }
 
@@ -147,6 +154,14 @@ static void computeSafeNodesSimulation(Graph &fromG, const Function &F,
 using namespace llvm;
 
 namespace seahorn {
+
+InterMemPreProc::InterMemPreProc(seadsa::CompleteCallGraph &ccg,
+                               seadsa::ShadowMem &shadowDsa,
+                               expr::ExprFactory &efac)
+    : m_ccg(ccg), m_shadowDsa(shadowDsa), m_efac(efac) {
+  m_keyBase = mkTerm<std::string>("k", m_efac);
+};
+
 // -- computes the safe nodes per callsite of a module
 bool InterMemPreProc::runOnModule(Module &M) {
 
@@ -197,19 +212,6 @@ bool InterMemPreProc::runOnModule(Module &M) {
         computeSafeNodesSimulation(*(const_cast<Graph *>(&calleeG)), *f_callee,
                                    safeCallee, safeCaller, simMap);
 
-        // remove from safe the ones that are not CI safe because of the threshold
-        // NodeSet &safeCI = getUnsafeNodes(f_callee);
-        // SimulationMapper &smSAS = m_smF[f_callee];
-
-        // for (auto n : safeCallee){
-        //   const Node * nSAS = smSAS.get(*n).getNode();
-        //   if (!isSafeNode(safeCI, nSAS)){
-        //     safeCallee.erase(n); // TODO: ????
-        //     // errs() << "removing safe"
-        //     //        << *simMap.get(*n).getNode() << "\n";
-        //     safeCaller.erase(simMap.get(*n).getNode());
-        //   }
-        // }
       }
     }
   }
@@ -263,25 +265,17 @@ void InterMemPreProc::runOnFunction(const Function *F) {
 
   // -- compute number of accesses to safe nodes
   RegionsMap &rm = m_frm[F];
+  NodeKeysMap &nkm = m_fnkm[F];
 
   for (const Argument &a : F->args())
     if (buG.hasCell(a))
-      recProcessNode(buG.getCell(a), safeSAS, simMap, rm);
+      recProcessNode(buG.getCell(a), safeSAS, simMap, rm, nkm);
 
   for (auto &kv : buG.globals())
-    recProcessNode(*kv.second, safeSAS, simMap, rm);
+    recProcessNode(*kv.second, safeSAS, simMap, rm, nkm);
 
   if (buG.hasRetCell(*F))
-    recProcessNode(buG.getRetCell(*F), safeSAS, simMap, rm);
-
-  // -- remove the nodes that would be encoded with finite maps bigger than the
-  // threshold
-  // for (auto kv : rm)
-  //   if(kv.second > FmapsMaxKeys){
-  //     kv.second = 0; // TODO: does this work?
-  //     safeSAS.erase(kv.first); // remove a safe to be used for the CS safe nodes
-  //   }
-
+    recProcessNode(buG.getRetCell(*F), safeSAS, simMap, rm, nkm);
 }
 
 unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
@@ -293,15 +287,31 @@ unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
   return getNumAccesses(nCI.getNode(), f);
 }
 
+ExprVector &InterMemPreProc::getKeys(const Node *n, const Function *f) {
+  assert(m_fnkm.count(f) > 0);
+  assert(m_fnkm[f].count(n) > 0);
+
+  return m_fnkm[f][n];
+}
+ExprVector &InterMemPreProc::getKeysCellSummary(const Cell &c,
+                                                const Function *f) {
+  assert(m_smF.count(f) > 0);
+  SimulationMapper &sm = m_smF[f];
+  const Cell nCI = sm.get(c);
+
+  return getKeys(nCI.getNode(), f);
+}
+
 // -- processes the nodes in a graph to obtain the number accesses to different
 // offsets
 // -- cycles cannot happen because those nodes would be marked as unsafe
-void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &toSafeNodes,
-                                     SimulationMapper &simMap, RegionsMap &rm) {
+void InterMemPreProc::recProcessNode(const Cell &cFrom, const NodeSet &toSafeNodes,
+                                     SimulationMapper &simMap, RegionsMap &rm,
+                                     NodeKeysMap &nkm) {
 
   const Node *nFrom = cFrom.getNode();
 
-  if (nFrom->size() == 0)
+  if (nFrom->types().empty())
     // the node is not accessed in this graph
     return;
 
@@ -311,11 +321,32 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom, NodeSet &toSafeNodes,
   if (!isSafeNode(toSafeNodes, nTo))
     return;
 
-  rm[nTo] = rm[nTo] + cFrom.getNode()->types().size();
+  ExprVector &ks = nkm[nTo];
+  unsigned nk = rm[nTo];
+
+  for (auto field : cFrom.getNode()->types()) {
+    unsigned offset = field.getFirst();
+    Expr eOffset = mkTerm<expr::mpz_class>(offset, m_efac);
+
+    Cell cFromField(cFrom, offset);
+    Cell cToField = simMap.get(cFromField);
+
+    llvm::Optional<unsigned> opt_cellId = m_shadowDsa.getCellId(cToField);
+    assert(opt_cellId.hasValue());
+
+    ks.push_back(
+                 finite_map::tagCell(bind::intConst(variant::variant(nk, m_keyBase)), opt_cellId.getValue(), cToField.getRawOffset()));
+    nk++;
+  }
+
+  rm[nTo] = nk;
+
+  if (nFrom->getLinks().empty())
+    return;
 
   // follow the pointers of the node
   for (auto &links : nFrom->getLinks())
-    recProcessNode(*links.second, toSafeNodes, simMap, rm);
+    recProcessNode(*links.second, toSafeNodes, simMap, rm, nkm);
 }
 
 } // namespace seahorn

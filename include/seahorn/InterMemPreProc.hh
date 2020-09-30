@@ -5,6 +5,8 @@
 #include "seadsa/Mapper.hh"
 #include "seadsa/ShadowMem.hh"
 
+#include "seahorn/Expr/ExprCore.hh"
+
 namespace seahorn {
 
 // preprocesor for vcgen with memory copies
@@ -42,9 +44,18 @@ private:
   using FunctionRegionsMap = llvm::DenseMap<const llvm::Function *, RegionsMap>;
   FunctionRegionsMap m_frm;
 
+  using NodeKeysMap = llvm::DenseMap<const Node *, expr::ExprVector>;
+  using FunctionNodeKeysMap =
+      llvm::DenseMap<const llvm::Function *, NodeKeysMap>;
+  FunctionNodeKeysMap m_fnkm;
+
+  expr::ExprFactory &m_efac;
+  // -- constant base for keys
+  expr::Expr m_keyBase;
+
 public:
-  InterMemPreProc(seadsa::CompleteCallGraph &ccg, seadsa::ShadowMem &shadowDsa)
-      : m_ccg(ccg), m_shadowDsa(shadowDsa){};
+  InterMemPreProc(seadsa::CompleteCallGraph &ccg, seadsa::ShadowMem &shadowDsa,
+                  expr::ExprFactory &efac);
 
   /*! \brief For each CallSite of a module, it obtains the simulation relation
    *   between the caller and the callee (context sensitive) and stores it.
@@ -85,8 +96,12 @@ public:
 
   unsigned getNumCIAccessesCellSummary(const Cell &c, const Function *f);
 
+  expr::ExprVector &getKeys(const Node *n, const Function *f);
+  expr::ExprVector &getKeysCellSummary(const Cell &c, const Function *f);
+
 private:
-  void recProcessNode(const Cell &cFrom, NodeSet &unsafeNodes,
-                      SimulationMapper &simMap, RegionsMap &rm);
+  void recProcessNode(const Cell &cFrom, const NodeSet &unsafeNodes,
+                      SimulationMapper &simMap, RegionsMap &rm,
+                      NodeKeysMap &nkm);
 };
 } // namespace seahorn

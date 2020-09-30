@@ -258,8 +258,8 @@ TEST_CASE("expr.finite_map.mkInitializedMap") {
   ExprVector values = {mkInt(41, efac), mkInt(42, efac), mkInt(43, efac)};
 
   Expr lmdKeys = finite_map::mkKeys(keys, efac);
-  Expr lmdValues = finite_map::mkInitializedMap(keys, sort::intTy(efac), values, values[0],
-                                                lmdKeys);
+  Expr lmdValues = finite_map::mkInitializedMap(keys, sort::intTy(efac), values,
+                                                values[0], lmdKeys);
 
   Expr u_map =
       finite_map::constFiniteMap(keys, values[0], values); // uninterpreted map
@@ -393,8 +393,8 @@ TEST_CASE("expr.finite_map.fmap_2keys") {
   EZ3 z3(efac);
   ZSimplifier<EZ3> zsimp(z3);
 
-  CHECK(
-        visit_body({k1, k2, v1}, mk<EQ>(v1, finite_map::get(map_set, k1)), efac, zsimp));
+  CHECK(visit_body({k1, k2, v1}, mk<EQ>(v1, finite_map::get(map_set, k1)), efac,
+                   zsimp));
 }
 
 TEST_CASE("expr.finite_map.cmp_gets_fmap") {
@@ -437,12 +437,12 @@ TEST_CASE("expr.finite_map.fmap_eq") {
   Expr map_eq = mk<EQ>(map_var1, map_set);
   // map1=set(defmap(defk(k1), fmap-default(0)), k1, v1))
 
-
   CHECK(visit_body(vars, map_eq, efac, zsimp));
 
   // v1 = get(map1, k1), map1=set(defmap(defk(k1), fmap-default(0)), k1, v1))
   Expr ne = visit_body(
-                       vars, mk<AND>(map_eq, mk<EQ>(finite_map::get(map_var1, k1), v1)), efac, zsimp);
+      vars, mk<AND>(map_eq, mk<EQ>(finite_map::get(map_var1, k1), v1)), efac,
+      zsimp);
   CHECK(boost::lexical_cast<std::string>(z3_simplify(z3, ne)) != "false");
 }
 
@@ -478,7 +478,7 @@ TEST_CASE("expr.finite_map.transf_body") {
   HornClauseDB tdb(efac);
   EZ3 z3(efac);
 
-  removeFiniteMapsHornClausesTransf(db, tdb,z3);
+  removeFiniteMapsHornClausesTransf(db, tdb, z3);
 
   errs() << "HornClauseDB without fmaps\n";
   errs() << tdb << "\n";
@@ -569,7 +569,7 @@ TEST_CASE("expr.finite_map.trans_fmap_args" * doctest::skip(true)) {
   HornClauseDB tdb(efac);
   EZ3 z3(efac);
 
-  removeFiniteMapsHornClausesTransf(db, tdb,z3);
+  removeFiniteMapsHornClausesTransf(db, tdb, z3);
   errs() << "HornClauseDB without fmaps\n" << tdb << "\n";
 
   CHECK(!solveHornClauseDBZ3(tdb));
@@ -804,4 +804,25 @@ TEST_CASE("expr.finite_map.full_transf_2keys") {
   // This should be solvable by Z3
 
   CHECK(!solveHornClauseDBZ3(tdb));
+}
+
+TEST_CASE("expr.simplifier") {
+  ExprFactory efac;
+  EZ3 z3(efac);
+  // ZParams<EZ3> params(z3);
+  // params.set("pull_cheap_ite", true);
+  // params.set("ite_extra_rules", true);
+  ZSimplifier<EZ3> zsimp(z3);
+  zsimp.params().set("pull_cheap_ite", true);
+  zsimp.params().set("ite_extra_rules", true);
+
+  Expr k = mkIntConst("k", efac);
+  Expr v1 = mkIntConst("v1", efac);
+  Expr v2 = mkIntConst("v2", efac);
+  Expr p = mkIntConst("p", efac);
+  Expr oneE = mkInt(1, efac);
+
+  Expr toSimp = mk<ITE>(mk<EQ>(oneE,  mk<ITE>(mk<EQ>(k, p), oneE, mkInt(0, efac))), v1, v2);
+  errs() << "before simp: " << *toSimp << "\n";
+  errs() << "simplified: " << *zsimp.simplify(toSimp) << "\n";
 }
