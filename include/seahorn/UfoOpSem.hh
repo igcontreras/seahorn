@@ -241,6 +241,8 @@ private:
 
   FMapExprMap m_initKeys;
 
+  Instruction * m_csInst; // callsite that we are processing
+
   using NodeKeysMap = DenseMap<const seadsa::Node *, ExprVector>;
   using FunctionNodeKeysMap = std::map<const Function *, NodeKeysMap>;
   FunctionNodeKeysMap m_fNodeKeysM;
@@ -253,12 +255,12 @@ private:
                  const Function &F);
 
   void recVCGenMem(const Cell &c_callee, Expr ptrInt, Expr ptrOut,
-                   const NodeSet &unsafeNodes, CellSet &explored,
-                   SimulationMapper &simMap, const Function &F);
+                   const NodeSet &unsafeNodes, SimulationMapper &simMap,
+                   const Function &F);
 
   Expr fmVariant(Expr e, const ExprVector &keys);
-  void addKeyVal(Cell c, Expr basePtr, Expr offset, MemOpt ao);
-  void storeVal(Cell c, Expr readFrom, Expr basePtr, Expr offset);
+  void addKeyVal(Cell c, Expr basePtr, unsigned offset, MemOpt ao);
+  void storeVal(Cell c, Expr readFrom, Expr basePtr, unsigned offset);
 
   // creates an ExprVector if not initialized already
   ExprVector &getExprKeys(Expr e) { return m_fmKeys[e]; }
@@ -266,8 +268,7 @@ private:
   ExprVector &getExprValues(Expr e) { return m_fmValues[e]; }
   Expr memObtainValue(Expr mem, Expr offset);
   Expr memSetValue(Expr mem, Expr offset, Expr v);
-  Expr getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee, MemOpt ao,
-                         const Function &F);
+  Expr getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee, MemOpt ao);
   void recCollectReachableKeys(const Cell &c, const Function &F, Expr basePtr,
                                const NodeSet &safeNs, SimulationMapper &sm,
                                NodeKeysMap &nkm, NodeIdMap &nim);

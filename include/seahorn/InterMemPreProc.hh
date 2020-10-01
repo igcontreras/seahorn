@@ -44,10 +44,15 @@ private:
   using FunctionRegionsMap = llvm::DenseMap<const llvm::Function *, RegionsMap>;
   FunctionRegionsMap m_frm;
 
+  llvm::DenseMap<const llvm::Instruction *, RegionsMap> m_irm; // for callsites
+
   using NodeKeysMap = llvm::DenseMap<const Node *, expr::ExprVector>;
   using FunctionNodeKeysMap =
       llvm::DenseMap<const llvm::Function *, NodeKeysMap>;
   FunctionNodeKeysMap m_fnkm;
+
+  llvm::DenseMap<const llvm::Instruction *, NodeKeysMap>
+      m_inkm; // for callsites
 
   expr::ExprFactory &m_efac;
   // -- constant base for keys
@@ -98,6 +103,9 @@ public:
 
   expr::ExprVector &getKeys(const Node *n, const Function *f);
   expr::ExprVector &getKeysCellSummary(const Cell &c, const Function *f);
+  expr::ExprVector &getKeysCellCS(const Cell &cCallee, const Instruction *i);
+
+  void precomputeFiniteMapTypes(CallSite &CS);
 
 private:
   void recProcessNode(const Cell &cFrom, const NodeSet &unsafeNodes,

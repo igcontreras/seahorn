@@ -446,8 +446,7 @@ inline Expr mkMapsDecl(Expr fdecl) {
 // ----------------------------------------------------------------------
 
 inline Expr mkCellTag(unsigned id1, unsigned id2, ExprFactory &efac) {
-  return mk<CELL>(mkTerm<expr::mpz_class>(id1, efac),
-                  mkTerm<expr::mpz_class>(id2, efac));
+  return mk<CELL>(mkTerm<unsigned>(id1, efac), mkTerm<unsigned>(id2, efac));
 }
 
 inline Expr tagCell(Expr base, unsigned cellId, unsigned offset) {
