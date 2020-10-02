@@ -219,12 +219,19 @@ bool sameNode(Expr e1, Expr e2) {
   return getCellExpr(e1)->left() == getCellExpr(e2)->left();
 }
 
+bool validDsaConst(Expr e) {
+  if (!bind::IsConst()(e))
+    return false;
+
+  Expr name = variant::mainVariant(bind::name(bind::fname(e)));
+  Expr cellE = variant::getTag(name);
+  return cellE != nullptr && isOpX<CELL>(cellE);
+}
 bool evaluableDsaExpr(Expr e) {
-  if (bind::IsConst()(e))
+  if (validDsaConst(e))
     return true;
 
-  return isOpX<PLUS>(e) && bind::IsConst()(e->left());  // TODO:
-    // !isOp<mpz_class>(e->right());
+  return isOpX<PLUS>(e) && validDsaConst(e->left()) && isOp<MPZ>(e->right());
 }
 static Expr evalCondDsa(Expr cond) {
 
@@ -246,17 +253,25 @@ static Expr evalCondDsa(Expr cond) {
 class IteTopDownVisitor : public std::unary_function<Expr, VisitAction> {
 
   ExprFactory &m_efac;
-  ZSimplifier<EZ3> &m_simp;
 
 public:
-  IteTopDownVisitor(ExprFactory &efac, ZSimplifier<EZ3> &zsimp)
-      : m_efac(efac), m_simp(zsimp) {}
+  IteTopDownVisitor(ExprFactory &efac) : m_efac(efac) {}
 
   VisitAction operator()(Expr exp) {
-    if (isOpX<ITE>(exp) && isOpX<EQ>(exp->left())) { // EQ should always hold
+    if (isOpX<ITE>(exp) && isOpX<EQ>(exp->left())) {
       Expr cond = evalCondDsa(exp->left());
-      return VisitAction::changeDoKids(
-          boolop::lite(cond, exp->arg(1), exp->arg(2)));
+      while (isOpX<FALSE>(cond)) {
+        exp = exp->last();
+        if (isOpX<ITE>(exp) && isOpX<EQ>(exp->left()))
+          cond = evalCondDsa(exp->left());
+        else
+          break;
+      }
+      if (isOpX<FALSE>(cond))
+        return VisitAction::changeDoKids(exp);
+      else
+        return VisitAction::changeDoKids(
+            boolop::lite(cond, exp->arg(1), exp->arg(2)));
     } else if (bind::IsConst()(exp) || bind::isFdecl(exp))
       return VisitAction::skipKids();
     else
@@ -264,15 +279,17 @@ public:
   }
 };
 
+static Expr dsaIteSimplify(Expr e) {
+  IteTopDownVisitor itdv(e->efac());
+  return visit(itdv, e);
+}
+
 // ----------------------------------------------------------------------
 //  FiniteMapBodyVisitor
 // ----------------------------------------------------------------------
 
 // -- rewrites a map term (if not already) to be used in a map primitive
 static Expr mkFMapPrimitiveArgCore(Expr map, FMapExprsInfo &fmei) {
-
-  LOG("fmap_transf", errs()
-                         << "-- mkFMapPrimitiveArgCore arg: " << *map << "\n");
 
   Expr fmTy = fmei.m_type[map];
   assert(fmTy);
@@ -313,9 +330,8 @@ static Expr getValueAtDef(Expr map, Expr k, unsigned pos,
       return finite_map::fmapDefDefault(map)->left();
   } // already an expanded map term
 
-  IteTopDownVisitor itdv(map->efac(), zsimp);
-  return visit(
-      itdv, zsimp.simplify(finite_map::mkGetVal(map, k))); // TODO: use cache?
+  return dsaIteSimplify(
+      zsimp.simplify(finite_map::mkGetVal(map, k))); // TODO: remove basic simplifier?
 
   // return zsimp.simplify(finite_map::mkGetVal(map, k));
 }
@@ -511,7 +527,9 @@ static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
     return finite_map::get(map, key);
   }
 
-  Expr defmap = fmei.m_fmapVarTransf[map];
+  Expr defmap = map;
+  if (bind::isFiniteMapConst(map))
+    defmap = fmei.m_fmapVarTransf[map];
 
   // get from defmap
   if (finite_map::isInitializedFiniteMap(defmap))
@@ -519,10 +537,8 @@ static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
 
   // get from lambda
   map = mkFMapPrimitiveArgCore(map, fmei);
-  Expr v = fmei.m_zsimp.simplify(finite_map::mkGetVal(map, key));
   // does eager simplification during beta reduction
-  IteTopDownVisitor itdv(fmei.m_efac, fmei.m_zsimp);
-  return visit(itdv, v); // TODO: use cache?
+  return dsaIteSimplify(fmei.m_zsimp.simplify(finite_map::mkGetVal(map, key)));
 }
 
 // -- obtains a new definition after inserting a value, returns `nullptr` if the
@@ -586,7 +602,10 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
     return finite_map::set(map, key, value);
   }
 
-  Expr defmap = fmei.m_fmapVarTransf[map];
+  Expr defmap = map;
+  if (bind::isFiniteMapConst(map))
+    defmap = fmei.m_fmapVarTransf[map];
+
   if (finite_map::isInitializedFiniteMap(defmap)) {
     defmap = mkSetDefCore(defmap, key, value);
     if (defmap != nullptr) { // optimization could be done
@@ -595,13 +614,13 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
       return defmap;
     }
   }
+
   Expr procMap = mkFMapPrimitiveArgCore(map, fmei);
 
   Expr fmTy = fmei.m_type[map];
   Expr kTy = bind::rangeTy(bind::name(sort::finiteMapKeyTy(fmTy)->arg(0)));
 
   Expr res = finite_map::mkSetVal(procMap, key, kTy, value);
-  res = fmei.m_zsimp.simplify(res);
 
   if (isOpX<CONST_FINITE_MAP>(map))
     fmei.m_fmapDefk[res] = finite_map::fmapDefKeys(map);
@@ -685,7 +704,7 @@ Expr FiniteMapBodyRewriter::operator()(Expr exp) {
     res = mkEqCore(exp->left(), exp->right(), m_fmei);
   } else if (isOpX<IMPL>(exp)) {
     m_fmei.m_dimpl--;
-    res = exp;
+    return exp;
   } else if (isOpX<SAME_KEYS>(exp)) {
     res = mkSameKeysCore(exp->left(), exp->right(), m_fmei);
   } else { // do nothing

@@ -337,6 +337,9 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom,
     ks.push_back(
         finite_map::tagCell(bind::intConst(variant::variant(nk, m_keyBase)),
                             opt_cellId.getValue(), cToField.getRawOffset()));
+    Expr a =
+        finite_map::tagCell(bind::intConst(variant::variant(nk, m_keyBase)),
+                            opt_cellId.getValue(), cToField.getRawOffset());
     nk++;
   }
 
@@ -385,8 +388,11 @@ void InterMemPreProc::precomputeFiniteMapTypes(CallSite &CS) {
   for (auto &kv : calleeG.globals())
     recProcessNode(*kv.second, safeCaller, sm, rm, nkm);
 
-  if (calleeG.hasRetCell(*f_callee))
-    recProcessNode(calleeG.getRetCell(*f_callee), safeCaller, sm, rm, nkm);
+  if (calleeG.hasRetCell(*f_callee)){
+    const Cell &c = calleeG.getRetCell(*f_callee);
+    if (c.getNode()->isModified())
+      recProcessNode(c, safeCaller, sm, rm, nkm);
+  }
 }
 
 } // namespace seahorn
