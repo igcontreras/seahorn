@@ -911,8 +911,12 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       }
     }
 
-    if (!m_inMem || !m_outMem || !m_sem.isTracked(*I.getOperand(0)))
+    if (!m_inMem || !m_outMem)
       return;
+    else if (!m_sem.isTracked(*I.getOperand(0))){ // treated as noop
+      m_side.push_back(mk<EQ>(m_outMem, m_inMem));
+      return;
+    }
 
     Expr act = GlobalConstraints ? trueE : m_activeLit;
     Expr v = lookup(*I.getOperand(0));
@@ -933,6 +937,9 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
           store = op::array::store(m_inMem, idx, v);
         }
         side(m_outMem, store, !ArrayGlobalConstraints);
+      }
+      else { // treat unknown memory accesses as noop
+        m_side.push_back(mk<EQ>(m_outMem, m_inMem));
       }
     }
 
@@ -1699,10 +1706,6 @@ Expr FMapUfoOpSem::symb(const Value &I) {
         const Function *F = i->getParent()->getParent();
 
         if (const CallInst *CI = dyn_cast<const CallInst>(&I)) {
-          LOG("fmap_symb",
-              errs() << "Variable of: " << F->getGlobalIdentifier() << "\n";
-              errs() << "Instruction: " << *i << "\n");
-
           auto opt_c = m_shadowDsa->getShadowMemCell(*CI);
           assert(opt_c.hasValue());
           const Node &n = *const_cast<Node *>(opt_c.getValue().getNode());
@@ -1714,11 +1717,8 @@ Expr FMapUfoOpSem::symb(const Value &I) {
               Expr v = mkTerm<const Value *>(&I, m_efac); // same name as array
                                                           // but different sort
               ExprVector &keys = m_preproc->getKeys(&n, F);
+              assert(nKs==keys.size());
               Expr intTy = sort::intTy(m_efac);
-              LOG("fmap_symb", errs() << *v << ": "
-                                      << *sort::finiteMapTy(intTy, keys)
-                                      << "\nnode:";
-                  n.dump());
               return bind::mkConst(v, sort::finiteMapTy(intTy, keys));
             }
           }
@@ -1737,10 +1737,12 @@ Expr FMapUfoOpSem::symb(const Value &I) {
       Graph &g = ga.getGraph(*F);
       if (g.hasCell(I)) {
         const Cell &c = g.getCell(I);
-        llvm::Optional<unsigned> opt_cellId = m_shadowDsa->getCellId(c);
-        assert(opt_cellId.hasValue());
-        return finite_map::tagCell(UfoOpSem::symb(I), opt_cellId.getValue(),
-                                   c.getRawOffset());
+        if (c.getNode()->size() > 0 || c.getNode()->isOffsetCollapsed()) {
+          llvm::Optional<unsigned> opt_cellId = m_shadowDsa->getCellId(c);
+          if (opt_cellId.hasValue())
+            return finite_map::tagCell(UfoOpSem::symb(I), opt_cellId.getValue(),
+                                       c.getRawOffset());
+        }
       }
     }
   }
