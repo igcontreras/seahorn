@@ -9,13 +9,15 @@
 
 namespace seahorn {
 
+using CellKeysMap =
+  llvm::DenseMap<const seadsa::Node *, std::unordered_map<unsigned, expr::ExprVector>>;
+
 // preprocesor for vcgen with memory copies
 class InterMemPreProc {
   /*! \brief Keeps for each CallSite of a module the simulation relation
    * between the caller and the callee (context sensitive), the nodes that
    * unsafe to copy per callee, caller and function (context insensitive).
    */
-
 private:
   seadsa::CompleteCallGraph &m_ccg;
   seadsa::ShadowMem &m_shadowDsa;
@@ -31,28 +33,20 @@ private:
 
   using NodesCSMap = llvm::DenseMap<const llvm::Instruction *, NodeSet>;
 
-  NodesCSMap
-      m_unsafen_cs_callee; // set of unsafe nodes in the callee of callsite
-  NodesCSMap
-      m_unsafen_cs_caller; // set of unsafe nodes in the caller of callsite
+  NodesCSMap m_safen_cs_callee; // set of unsafe nodes in the callee of callsite
+  NodesCSMap m_safen_cs_caller; // set of unsafe nodes in the caller of callsite
 
   using NodeFMap = llvm::DenseMap<const llvm::Function *, NodeSet>;
 
-  NodeFMap m_unsafeNF; // set of unsafe nodes in the callee of a function
+  NodeFMap m_safeNF; // set of unsafe nodes in the callee of a function
 
-  using RegionsMap = llvm::DenseMap<const Node *, unsigned>;
-  using FunctionRegionsMap = llvm::DenseMap<const llvm::Function *, RegionsMap>;
-  FunctionRegionsMap m_frm;
+  using RegionsMap =
+      llvm::DenseMap<std::pair<const seadsa::Node *, unsigned>, unsigned>;
+  llvm::DenseMap<const llvm::Function *, RegionsMap> m_frm;
+  llvm::DenseMap<const llvm::Instruction *, RegionsMap> m_irm; // callsites
 
-  llvm::DenseMap<const llvm::Instruction *, RegionsMap> m_irm; // for callsites
-
-  using NodeKeysMap = llvm::DenseMap<const Node *, expr::ExprVector>;
-  using FunctionNodeKeysMap =
-      llvm::DenseMap<const llvm::Function *, NodeKeysMap>;
-  FunctionNodeKeysMap m_fnkm;
-
-  llvm::DenseMap<const llvm::Instruction *, NodeKeysMap>
-      m_inkm; // for callsites
+  llvm::DenseMap<const llvm::Function *, CellKeysMap> m_fnkm;
+  llvm::DenseMap<const llvm::Instruction *, CellKeysMap> m_inkm; // callsites
 
   expr::ExprFactory &m_efac;
   // -- constant base for keys
@@ -68,8 +62,12 @@ public:
    */
   bool runOnModule(llvm::Module &M);
 
-  NodeSet &getUnsafeNodesCallerCS(const Instruction *I);
-  NodeSet &getUnsafeNodesCalleeCS(const Instruction *I);
+  NodeSet &getSafeNodesCallerCS(const Instruction *I);
+  NodeSet &getSafeNodesCalleeCS(const Instruction *I);
+
+  unsigned getOffset(const Cell &c) {
+    return m_shadowDsa.splitDsaNodes() ? c.getOffset() : 0;
+  }
 
   bool isSafeNode(NodeSet &unsafe, const seadsa::Node *n);
   bool isSafeNode(const NodeSet &unsafe, const seadsa::Node *n);
@@ -89,19 +87,19 @@ public:
     return m_smCS[cs.getInstruction()];
   }
 
-  NodeSet &getUnsafeNodes(const Function *f) { return m_unsafeNF[f]; }
+  NodeSet &getSafeNodes(const Function *f) { return m_safeNF[f]; }
 
-  unsigned getNumAccesses(const Node *n, const Function *f) {
+  unsigned getNumAccesses(const Cell &c, const Function *f) {
     assert(m_frm.count(f) > 0);
-    if (m_frm[f].count(n) == 0)
+    if (m_frm[f].count({c.getNode(), getOffset(c)}) == 0)
       return 0;
     else
-      return m_frm[f][n];
+      return m_frm[f][{c.getNode(), getOffset(c)}];
   }
 
   unsigned getNumCIAccessesCellSummary(const Cell &c, const Function *f);
 
-  expr::ExprVector &getKeys(const Node *n, const Function *f);
+  expr::ExprVector &getKeysCell(const Cell &c, const Function *f);
   expr::ExprVector &getKeysCellSummary(const Cell &c, const Function *f);
   expr::ExprVector &getKeysCellCS(const Cell &cCallee, const Instruction *i);
 
@@ -110,6 +108,14 @@ public:
 private:
   void recProcessNode(const Cell &cFrom, const NodeSet &unsafeNodes,
                       SimulationMapper &simMap, RegionsMap &rm,
-                      NodeKeysMap &nkm);
+                      CellKeysMap &nkm);
+  template <typename ValueT>
+  ValueT &findCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT> &map,
+                      const Cell &c);
+
+  // template <typename ValueT>
+  // unsigned countCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT> &map,
+  //                       const Cell &c);
+  expr::ExprVector &findKeysCellMap(CellKeysMap &map, const Cell &c);
 };
 } // namespace seahorn

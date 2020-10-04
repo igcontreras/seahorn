@@ -94,7 +94,7 @@ enum class MemOpt { IN, OUT };
 
 // map to store the correspondence between node ids and their correspondent
 // expression
-using NodeIdMap = DenseMap<std::pair<const seadsa::Node *, unsigned>, Expr>;
+using CellExprMap = DenseMap<std::pair<const seadsa::Node *, unsigned>, Expr>;
 
 class MemUfoOpSem : public UfoOpSem {
 protected:
@@ -102,21 +102,21 @@ protected:
   seadsa::ShadowMem *m_shadowDsa = nullptr;
 
   // original arrays names of a cell
-  NodeIdMap m_orig_array_in;
-  NodeIdMap m_orig_array_out;
+  CellExprMap m_orig_array_in;
+  CellExprMap m_orig_array_out;
   // current number to generate intermediate array names for the copies
   int m_copy_count = 0;
 
 private:
   // array names to replace for a cell
-  NodeIdMap m_rep_in;
-  NodeIdMap m_rep_out;
+  CellExprMap m_rep_in;
+  CellExprMap m_rep_out;
 
   // for the intermediate arrays name for copies for a cell
-  NodeIdMap m_tmprep_in;
+  CellExprMap m_tmprep_in;
   // this creates non-deterministic vcgen (iterating over it to replace the new
   // parameter names)
-  NodeIdMap m_tmprep_out;
+  CellExprMap m_tmprep_out;
 
 public:
   MemUfoOpSem(ExprFactory &efac, Pass &pass, const DataLayout &dl,
@@ -143,32 +143,31 @@ protected:
                    seadsa::SimulationMapper &simMap, ExprVector &side);
 
   // Internal methods to handle array expressions and cells.
-  void addCIArraySymbol(CallInst *CI, Expr A, MemOpt ao);
-  virtual void addArraySymbol(const seadsa::Cell &c, Expr A, MemOpt ao);
+  void addCIMemSymbol(CallInst *CI, Expr A, MemOpt ao);
+  virtual void addMemSymbol(const seadsa::Cell &c, Expr A, MemOpt ao);
   Expr getOrigMemSymbol(const seadsa::Cell &c, MemOpt ao);
-  bool hasOrigArraySymbol(const seadsa::Cell &c, MemOpt ao);
+  bool hasOrigMemSymbol(const seadsa::Cell &c, MemOpt ao);
   // creates a new array symbol for array origE if it was not created already
-  Expr getFreshArraySymbol(const seadsa::Cell &c, MemOpt ao);
+  Expr getFreshMemSymbol(const seadsa::Cell &c, MemOpt ao);
 
   // creates a new array symbol for intermediate copies of an original array
   // origE. currE is the current intermediate name and newE is the new value to
   // copy
-  void newTmpArraySymbol(const seadsa::Cell &c, Expr &currE, Expr &newE,
+  void newTmpMemSymbol(const seadsa::Cell &c, Expr &currE, Expr &newE,
                          MemOpt ao);
 
   // processes the shadow mem instructions prior to a callsite to obtain the
   // expressions that correspond to each of the cells involved.
   virtual void processShadowMemsCallSite(CallSiteInfo &csi);
-  bool hasExprNode(const NodeIdMap &ni, const Cell &c);
-  bool hasExprNode(const NodeIdMap &ni, const Node &n);
+  bool hasExprCell(const CellExprMap &nim, const Cell &c);
+  Expr getExprCell(const CellExprMap &nim, const Cell &c);
+  Expr getExprCell(const CellExprMap &nim, const Node *n, unsigned offset);
 
-  Expr getExprNode(const NodeIdMap &ni, const Cell &c);
-  Expr getExprNode(const NodeIdMap &nim, const Node &n);
   // \brief true if `c` is encoded with a scalar variable
   bool isMemScalar(const Cell &c);
 
 private:
-  NodeIdMap &getOrigMap(MemOpt ao) {
+  CellExprMap &getOrigMap(MemOpt ao) {
     return ao == MemOpt::IN ? m_orig_array_in : m_orig_array_out;
   }
 };
@@ -213,7 +212,7 @@ public:
 
 protected:
   void processShadowMemsCallSite(CallSiteInfo &csi) override;
-  void addArraySymbol(const seadsa::Cell &c, Expr A, MemOpt ao) override;
+  void addMemSymbol(const seadsa::Cell &c, Expr A, MemOpt ao) override;
 
 private:
   // hides how the memory is split
@@ -232,8 +231,6 @@ private:
   using ExprCellMap = std::map<Expr, std::pair<const seadsa::Node *, unsigned>>;
   ExprCellMap m_exprCell;
 
-  using CellSet = DenseSet<std::pair<const seadsa::Node *, unsigned>>;
-
   // -- constant base for keys
   Expr m_keyBase;
   // -- default value for uninitialized values of maps
@@ -243,12 +240,13 @@ private:
 
   Instruction * m_csInst; // callsite that we are processing
 
-  using NodeKeysMap = DenseMap<const seadsa::Node *, ExprVector>;
-  using FunctionNodeKeysMap = std::map<const Function *, NodeKeysMap>;
-  FunctionNodeKeysMap m_fNodeKeysM;
+  using CellKeysMap =
+      DenseMap<std::pair<const seadsa::Node *, unsigned>, ExprVector>;
+  using FunctionCellKeysMap = std::map<const Function *, CellKeysMap>;
+  FunctionCellKeysMap m_fCellKeysM;
 
-  using FunctionNodeIdMap = std::map<const Function *, NodeIdMap>;
-  FunctionNodeIdMap m_fInitSymNodes;
+  using FunctionCellExprMap = std::map<const Function *, CellExprMap>;
+  FunctionCellExprMap m_fInitSymNodes;
 
   void VCgenCell(const Cell &cArgCallee, Expr basePtr,
                  const NodeSet &unsafeCallerNodes, SimulationMapper &sm,
@@ -271,34 +269,27 @@ private:
   Expr getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee, MemOpt ao);
   void recCollectReachableKeys(const Cell &c, const Function &F, Expr basePtr,
                                const NodeSet &safeNs, SimulationMapper &sm,
-                               NodeKeysMap &nkm, NodeIdMap &nim);
-  void processInitShadowMemsFunction(Instruction *I, NodeIdMap &nim,
+                               CellKeysMap &nkm, CellExprMap &nim);
+  void processInitShadowMemsFunction(Instruction *I, CellExprMap &nim,
                                      SymStore &s);
 
   void recAddSortedDef(const Expr map, const Expr def, const ExprMap &defs,
                        ExprSet &added, ExprVector &side);
-  void storeSymInitInstruction(Instruction *I, NodeIdMap &nim, Expr memE);
+  void storeSymInitInstruction(Instruction *I, CellExprMap &nim, Expr memE);
 
-  bool processedNodeKeysFunction(const Function &F) {
-    return m_fNodeKeysM.count(&F) > 0;
+  bool processedCellKeysFunction(const Function &F) {
+    return m_fCellKeysM.count(&F) > 0;
   }
-  NodeKeysMap &getNodeKeysFunction(const Function &F) {
-    return m_fNodeKeysM[&F]; // creates it if it doesn't exist
+  CellKeysMap &getCellKeysFunction(const Function &F) {
+    return m_fCellKeysM[&F]; // creates it if it doesn't exist
   }
 
   bool hasNodeSymFunction(const Function &F) {
     return m_fInitSymNodes.count(&F) > 0;
   }
-  NodeIdMap &getNodeSymFunction(const Function &F) {
+  CellExprMap &getNodeSymFunction(const Function &F) {
     return m_fInitSymNodes[&F]; // creates it if it
                                 // doesn't exist
-  }
-
-  bool containsCell(const CellSet &cs, const Cell &c) {
-    return cs.count({c.getNode(), getOffset(c)}) > 0;
-  }
-  void addCell(CellSet &cs, const Cell &c) {
-    cs.insert({c.getNode(), getOffset(c)});
   }
 };
 

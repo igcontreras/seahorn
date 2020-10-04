@@ -676,8 +676,6 @@ static Expr mkIteCore(Expr ite, FMapExprsInfo &fmei) {
       bind::abs<LAMBDA>(std::array<Expr, 1>{x},
                         boolop::lite(ite->first(), bind::betaReduce(th, x),
                                      bind::betaReduce(el, x)));
-  // TODO: fapp or betaReduce ? simplify?
-
   fmei.m_fmapDefk[res] = defkth;
   fmei.m_type[res] = ty;
 
