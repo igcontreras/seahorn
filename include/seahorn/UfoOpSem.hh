@@ -136,10 +136,8 @@ protected:
   Expr arrayVariant(Expr origE);
 
   // generates the literals to copy of an argument
-  void VCgenArg(const seadsa::Cell &c_arg_callee, Expr base_ptr,
-                NodeSet &unsafeCallerNodes, seadsa::SimulationMapper &sm,
-                ExprVector &side);
-  void recVCGenMem(const seadsa::Cell &c_callee, Expr ptr, NodeSet &safeNodes,
+  void recVCGenMem(const seadsa::Cell &c_callee, Expr ptr,
+                   const NodeSet &safeNodesCallee, const NodeSet &safeNodesCaller,
                    seadsa::SimulationMapper &simMap, ExprVector &side);
 
   // Internal methods to handle array expressions and cells.

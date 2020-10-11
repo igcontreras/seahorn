@@ -1303,8 +1303,8 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   const Function *calleeF = csi.m_cs.getCalledFunction();
   const Function *callerF = csi.m_cs.getCaller();
 
-  LOG("inter_mem", errs() << "callee: " << calleeF->getGlobalIdentifier();
-      errs() << " caller: " << callerF->getGlobalIdentifier(); errs() << "\n";);
+  LOG("inter_mem", errs() << "callee: " << calleeF->getName();
+      errs() << " caller: " << callerF->getName(); errs() << "\n";);
 
   if (!ga.hasSummaryGraph(*calleeF)) {
     UfoOpSem::execCallSite(csi, side, s);
@@ -1316,10 +1316,14 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   Graph &calleeG = ga.getSummaryGraph(*calleeF);
   NodeSet &safeNodesCaller =
       m_preproc->getSafeNodesCallerCS(CS.getInstruction());
+  NodeSet &safeNodesCallee =
+      m_preproc->getSafeNodesCalleeCS(CS.getInstruction());
+
   SimulationMapper &simMap = m_preproc->getSimulationCS(CS);
 
   unsigned init_params = g_im_stats.m_params_copied; // for statistics
 
+  ExprVector arrayStores;
   // generate literals that copy for arguments and global variables
   // this needs to be done before generating the literal for the call
   for (const Argument *arg : fi.args) {
@@ -1327,7 +1331,8 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     csi.m_fparams.push_back(argE);
     if (calleeG.hasCell(*arg)) { // checking that the argument is a pointer
       unsigned init_fields = g_im_stats.m_fields_copied;
-      recVCGenMem(calleeG.getCell(*arg), argE, safeNodesCaller, simMap, side);
+      recVCGenMem(calleeG.getCell(*arg), argE, safeNodesCallee, safeNodesCaller,
+                  simMap, arrayStores);
       LOG("inter_mem_counters", g_im_stats.m_n_params++;
           if (init_fields < g_im_stats.m_fields_copied)
               g_im_stats.m_params_copied++;);
@@ -1339,7 +1344,8 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     const Cell &c = calleeG.getCell(*gv);
     if (hasOrigMemSymbol(c, MemOpt::IN) || hasOrigMemSymbol(c, MemOpt::OUT)) {
       unsigned init_fields = g_im_stats.m_fields_copied;
-      recVCGenMem(calleeG.getCell(*gv), argE, safeNodesCaller, simMap, side);
+      recVCGenMem(calleeG.getCell(*gv), argE, safeNodesCallee, safeNodesCaller,
+                  simMap, arrayStores);
       LOG("inter_mem_counters", g_im_stats.m_n_gv++;
           if (init_fields < g_im_stats.m_fields_copied)
               g_im_stats.m_gv_copied++;);
@@ -1352,8 +1358,17 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
   Instruction &I = *csi.m_cs.getInstruction();
 
-  if (fi.ret)
-    csi.m_fparams.push_back(s.havoc(symb(I)));
+  if (fi.ret) {
+    Expr retE = s.havoc(symb(*csi.m_cs.getInstruction()));
+    csi.m_fparams.push_back(retE);
+    if (calleeG.hasCell(*fi.ret)) {
+      const Cell &c = calleeG.getCell(*fi.ret); // no
+      if (c.getNode()->isModified() &&
+          hasOrigMemSymbol(simMap.get(c), MemOpt::OUT))
+        recVCGenMem(c, retE, safeNodesCallee, safeNodesCaller, simMap,
+                    arrayStores);
+    }
+  }
 
   // place the new array name according to the literals generated for the copy
   for (auto it : m_tmprep_out) {
@@ -1386,6 +1401,9 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   assert(csi.m_fparams.size() == bind::domainSz(fi.sumPred));
 
   side.push_back(bind::fapp(fi.sumPred, csi.m_fparams));
+  // protect array copies
+  if (arrayStores.size() > 0)
+    side.push_back(boolop::limp(csi.m_fparams[0], boolop::land(arrayStores)));
 
   // reset for the next callsite
   m_orig_array_in.clear();
@@ -1493,40 +1511,30 @@ static Expr addOffset(Expr ptr, unsigned offset) {
 }
 
 void MemUfoOpSem::recVCGenMem(const Cell &cCallee, Expr ptr,
-                              NodeSet &safeNodes, SimulationMapper &simMap,
-                              ExprVector &side) {
+                              const NodeSet &safeNodesCe,
+                              const NodeSet &safeNodesCr,
+                              SimulationMapper &simMap, ExprVector &side) {
 
-  const Node *n_callee = cCallee.getNode();
+  const Node *nCallee = cCallee.getNode();
 
-  if (n_callee->size() == 0)
-    // the array was created but from the bu graph we know that it is not
-    // accessed
+  LOG("inter_mem_counters", if (nCallee->isArray()) g_im_stats.m_node_array++;);
+  LOG("inter_mem_counters",
+      if (nCallee->isOffsetCollapsed()) g_im_stats.m_node_ocollapsed++;);
+
+  if (nCallee->types().empty() || !m_preproc->isSafeNode(safeNodesCe, nCallee))
     return;
-
-  if (n_callee->isArray()) {
-    LOG("inter_mem_counters", g_im_stats.m_node_array++;);
-    return;
-  }
 
   const Cell &cCaller = simMap.get(cCallee);
-  const Node *n_caller = cCaller.getNode();
+  const Node *nCaller = cCaller.getNode();
 
-  LOG("inter_mem_counters",
-      if (n_callee->isOffsetCollapsed()) g_im_stats.m_node_ocollapsed++;);
-
-  if (!m_preproc->isSafeNode(safeNodes, n_caller))
-    return;
-  // checking modification in the bu graph, which is more precise
-  // than the previous approach
-  if (n_callee->isModified() && !cCallee.getNode()->types().empty()) {
-
+  if (nCallee->isModified() && m_preproc->isSafeNode(safeNodesCr, nCaller))
     for (auto field : cCallee.getNode()->types()) {
       unsigned offset = field.getFirst();
 
       Cell cCalleeField(cCallee, offset);
       Cell cCallerField = simMap.get(cCalleeField);
       if (isMemScalar(cCallerField)) // if the field is represented with a
-                                       // scalar, skip the copy
+                                     // scalar, skip the copy
         continue;
 
       // create a new name for that array if it was not created
@@ -1539,17 +1547,17 @@ void MemUfoOpSem::recVCGenMem(const Cell &cCallee, Expr ptr,
       side.push_back(mk<EQ>(nextA, tmpA));
       LOG("inter_mem_counters", g_im_stats.m_fields_copied++;);
     }
-  }
+
   LOG(
-      "inter_mem_counters", if (!m_preproc->isSafeNode(safeNodes, n_caller)) {
+      "inter_mem_counters", if (!m_preproc->isSafeNode(safeNodesCr, nCaller)) {
         g_im_stats.m_node_safe++;
       });
 
-  if (n_callee->getLinks().empty())
+  if (nCallee->getLinks().empty())
     return;
 
   // -- follow the links of the node
-  for (auto &links : n_callee->getLinks()) {
+  for (auto &links : nCallee->getLinks()) {
     const Field &f = links.first;
     const Cell &next_c = *links.second;
     const Node *next_n = next_c.getNode();
@@ -1563,7 +1571,7 @@ void MemUfoOpSem::recVCGenMem(const Cell &cCallee, Expr ptr,
     } else
       next_ptr = origA; // mem represented with a scalar
 
-    recVCGenMem(next_c, next_ptr, safeNodes, simMap, side);
+    recVCGenMem(next_c, next_ptr, safeNodesCe, safeNodesCr, simMap, side);
   }
 }
 
@@ -1802,7 +1810,8 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     csi.m_fparams.push_back(argE);
     // TODO: add special case for null, the keys will mismatch
     if (calleeG.hasCell(*arg)) // checking that the argument is a pointer
-      VCgenCell(calleeG.getCell(*arg), argE, safeNodesCallee, safeNodesCaller, simMap, *calleeF);
+      VCgenCell(calleeG.getCell(*arg), argE, safeNodesCallee, safeNodesCaller,
+                simMap, *calleeF);
   }
 
   for (const GlobalVariable *gv : fi.globals) {
@@ -1978,8 +1987,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCallee, Expr basePtrIn,
 
   const Node *nCallee = cCallee.getNode();
 
-  if (cCallee.getNode()->types().empty() ||
-      m_preproc->isSafeNode(safeNodesCe, nCallee))
+  if (nCallee->types().empty() || !m_preproc->isSafeNode(safeNodesCe, nCallee))
     return;
 
   const Cell &cCaller = simMap.get(cCallee);
@@ -2035,7 +2043,8 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCallee, Expr basePtrIn,
     Expr nextPtrIn = memObtainValue(origIn, addOffset(basePtrIn, offset));
     Expr nextPtrOut = memObtainValue(origOut, addOffset(basePtrOut, offset));
     // out already copied in the fields loop
-    recVCGenMem(next_c, nextPtrIn, nextPtrOut, safeNodesCe, safeNodesCr, simMap, F);
+    recVCGenMem(next_c, nextPtrIn, nextPtrOut, safeNodesCe, safeNodesCr, simMap,
+                F);
   }
 }
 
