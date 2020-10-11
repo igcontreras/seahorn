@@ -10,7 +10,8 @@
 namespace seahorn {
 
 using CellKeysMap =
-  llvm::DenseMap<const seadsa::Node *, std::unordered_map<unsigned, expr::ExprVector>>;
+    llvm::DenseMap<const seadsa::Node *,
+                   std::unordered_map<unsigned, expr::ExprVector>>;
 
 // preprocesor for vcgen with memory copies
 class InterMemPreProc {
@@ -38,7 +39,8 @@ private:
 
   using NodeFMap = llvm::DenseMap<const llvm::Function *, NodeSet>;
 
-  NodeFMap m_safeNF; // set of unsafe nodes in the callee of a function
+  NodeFMap m_safeSASF;
+  NodeFMap m_safeBUF;
 
   using RegionsMap =
       llvm::DenseMap<std::pair<const seadsa::Node *, unsigned>, unsigned>;
@@ -87,7 +89,8 @@ public:
     return m_smCS[cs.getInstruction()];
   }
 
-  NodeSet &getSafeNodes(const Function *f) { return m_safeNF[f]; }
+  NodeSet &getSafeNodes(const Function *f) { return m_safeSASF[f]; }
+  NodeSet &getSafeNodesBU(const Function *f) { return m_safeBUF[f]; }
 
   unsigned getNumAccesses(const Cell &c, const Function *f) {
     assert(m_frm.count(f) > 0);
@@ -106,15 +109,16 @@ public:
   void precomputeFiniteMapTypes(CallSite &CS);
 
 private:
-  void recProcessNode(const Cell &cFrom, const NodeSet &unsafeNodes,
-                      SimulationMapper &simMap, RegionsMap &rm,
-                      CellKeysMap &nkm);
+  void recProcessNode(const Cell &cFrom, const NodeSet &fromSafeNodes,
+                      const NodeSet &toSafeNodes, SimulationMapper &simMap,
+                      RegionsMap &rm, CellKeysMap &nkm);
   template <typename ValueT>
   ValueT &findCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT> &map,
                       const Cell &c);
 
   // template <typename ValueT>
-  // unsigned countCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT> &map,
+  // unsigned countCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT>
+  // &map,
   //                       const Cell &c);
   expr::ExprVector &findKeysCellMap(CellKeysMap &map, const Cell &c);
 };

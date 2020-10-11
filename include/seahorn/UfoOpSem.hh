@@ -139,7 +139,7 @@ protected:
   void VCgenArg(const seadsa::Cell &c_arg_callee, Expr base_ptr,
                 NodeSet &unsafeCallerNodes, seadsa::SimulationMapper &sm,
                 ExprVector &side);
-  void recVCGenMem(const seadsa::Cell &c_callee, Expr ptr, NodeSet &unsafeNodes,
+  void recVCGenMem(const seadsa::Cell &c_callee, Expr ptr, NodeSet &safeNodes,
                    seadsa::SimulationMapper &simMap, ExprVector &side);
 
   // Internal methods to handle array expressions and cells.
@@ -154,7 +154,7 @@ protected:
   // origE. currE is the current intermediate name and newE is the new value to
   // copy
   void newTmpMemSymbol(const seadsa::Cell &c, Expr &currE, Expr &newE,
-                         MemOpt ao);
+                       MemOpt ao);
 
   // processes the shadow mem instructions prior to a callsite to obtain the
   // expressions that correspond to each of the cells involved.
@@ -185,7 +185,7 @@ struct InterMemStats {
 
   unsigned m_node_array = 0;
   unsigned m_node_ocollapsed = 0;
-  unsigned m_node_unsafe = 0;
+  unsigned m_node_safe = 0;
 
   void print();
 
@@ -238,7 +238,7 @@ private:
 
   FMapExprMap m_initKeys;
 
-  Instruction * m_csInst; // callsite that we are processing
+  Instruction *m_csInst; // callsite that we are processing
 
   using CellKeysMap =
       DenseMap<std::pair<const seadsa::Node *, unsigned>, ExprVector>;
@@ -249,12 +249,13 @@ private:
   FunctionCellExprMap m_fInitSymNodes;
 
   void VCgenCell(const Cell &cArgCallee, Expr basePtr,
+                 const NodeSet &unsafeCalleeNodes,
                  const NodeSet &unsafeCallerNodes, SimulationMapper &sm,
                  const Function &F);
 
   void recVCGenMem(const Cell &c_callee, Expr ptrInt, Expr ptrOut,
-                   const NodeSet &unsafeNodes, SimulationMapper &simMap,
-                   const Function &F);
+                   const NodeSet &safeNodesCe, const NodeSet &safeNodesCr,
+                   SimulationMapper &simMap, const Function &F);
 
   Expr fmVariant(Expr e, const ExprVector &keys);
   void addKeyVal(Cell c, Expr basePtr, unsigned offset, MemOpt ao);
@@ -268,8 +269,9 @@ private:
   Expr memSetValue(Expr mem, Expr offset, Expr v);
   Expr getFreshMapSymbol(const Cell &cCaller, const Cell &cCallee, MemOpt ao);
   void recCollectReachableKeys(const Cell &c, const Function &F, Expr basePtr,
-                               const NodeSet &safeNs, SimulationMapper &sm,
-                               CellKeysMap &nkm, CellExprMap &nim);
+                               const NodeSet &safeNsBU, const NodeSet &safeNs,
+                               SimulationMapper &sm, CellKeysMap &nkm,
+                               CellExprMap &nim);
   void processInitShadowMemsFunction(Instruction *I, CellExprMap &nim,
                                      SymStore &s);
 

@@ -80,8 +80,6 @@ static void exploreNode(const Node &nCallee, const Node &nCaller,
 
   if (isUnboundedMem(&nCallee, &nCaller)) {
     propagateUnsafeChildren(nCallee, nCaller, ei);
-    return;
-
   } else {
     ei.m_explColor[&nCallee] = EColor::GRAY;
 
@@ -237,8 +235,8 @@ bool InterMemPreProc::isSafeNode(const NodeSet &unsafe, const Node *n) {
 }
 
 bool InterMemPreProc::isSafeNodeFunc(const Node &n, const Function *f) {
-  assert(m_safeNF.count(f) > 0);
-  return isSafeNode(m_safeNF[f], &n);
+  assert(m_safeSASF.count(f) > 0);
+  return isSafeNode(m_safeSASF[f], &n);
 }
 
 void InterMemPreProc::runOnFunction(const Function *F) {
@@ -257,8 +255,8 @@ void InterMemPreProc::runOnFunction(const Function *F) {
       *(const_cast<Graph *>(&buG)), *(const_cast<Graph *>(&sasG)), simMap);
   assert(simulated && "Summary graph could not be simulated with SAS graph");
 
-  NodeSet &safeSAS = m_safeNF[F];
-  NodeSet safeBU; // won't be used later
+  NodeSet &safeSAS = m_safeSASF[F];
+  NodeSet &safeBU = m_safeBUF[F];
   computeSafeNodesSimulation(*(const_cast<Graph *>(&buG)), *F, safeBU, safeSAS,
                              simMap);
 
@@ -268,13 +266,13 @@ void InterMemPreProc::runOnFunction(const Function *F) {
 
   for (const Argument &a : F->args())
     if (buG.hasCell(a))
-      recProcessNode(buG.getCell(a), safeSAS, simMap, rm, nkm);
+      recProcessNode(buG.getCell(a), safeBU, safeSAS, simMap, rm, nkm);
 
   for (auto &kv : buG.globals())
-    recProcessNode(*kv.second, safeSAS, simMap, rm, nkm);
+    recProcessNode(*kv.second, safeBU, safeSAS, simMap, rm, nkm);
 
   if (buG.hasRetCell(*F))
-    recProcessNode(buG.getRetCell(*F), safeSAS, simMap, rm, nkm);
+    recProcessNode(buG.getRetCell(*F), safeBU, safeSAS, simMap, rm, nkm);
 }
 
 unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
@@ -321,40 +319,39 @@ ExprVector &InterMemPreProc::findKeysCellMap(CellKeysMap &map, const Cell &c) {
 // offsets
 // -- cycles cannot happen because those nodes would be marked as unsafe
 void InterMemPreProc::recProcessNode(const Cell &cFrom,
+                                     const NodeSet &fromSafeNodes,
                                      const NodeSet &toSafeNodes,
                                      SimulationMapper &simMap, RegionsMap &rm,
                                      CellKeysMap &nkm) {
 
   const Node *nFrom = cFrom.getNode();
-  if (nFrom->types().empty())
+  if (nFrom->types().empty() || !isSafeNode(fromSafeNodes, nFrom))
     return;
 
   const Cell &cTo = simMap.get(cFrom);
-  if (!isSafeNode(toSafeNodes, cTo.getNode()))
-    return;
+  if (isSafeNode(toSafeNodes, cTo.getNode()))
+    for (auto field : cFrom.getNode()->types()) {
+      Cell cFromField(cFrom, field.getFirst());
+      Cell cToField = simMap.get(cFromField);
+      llvm::Optional<unsigned> opt_cellId = m_shadowDsa.getCellId(cToField);
+      assert(opt_cellId.hasValue());
 
-  for (auto field : cFrom.getNode()->types()) {
-    Cell cFromField(cFrom, field.getFirst());
-    Cell cToField = simMap.get(cFromField);
-    llvm::Optional<unsigned> opt_cellId = m_shadowDsa.getCellId(cToField);
-    assert(opt_cellId.hasValue());
+      auto &m = nkm[cToField.getNode()];
+      ExprVector &ks = m[getOffset(cToField)];
+      Expr key = finite_map::tagCell(
+          bind::intConst(variant::variant(ks.size(), m_keyBase)),
+          opt_cellId.getValue(), cToField.getRawOffset());
+      ks.push_back(key);
 
-    auto &m = nkm[cToField.getNode()];
-    ExprVector &ks = m[getOffset(cToField)];
-    Expr key = finite_map::tagCell(
-        bind::intConst(variant::variant(ks.size(), m_keyBase)),
-        opt_cellId.getValue(), cToField.getRawOffset());
-    ks.push_back(key);
-
-    rm[{cToField.getNode(), getOffset(cToField)}]++;
-  }
+      rm[{cToField.getNode(), getOffset(cToField)}]++;
+    }
 
   if (nFrom->getLinks().empty())
     return;
 
   // follow the pointers of the node
   for (auto &links : nFrom->getLinks())
-    recProcessNode(*links.second, toSafeNodes, simMap, rm, nkm);
+    recProcessNode(*links.second, fromSafeNodes, toSafeNodes, simMap, rm, nkm);
 }
 
 ExprVector &InterMemPreProc::getKeysCellCS(const Cell &cCallee,
@@ -376,6 +373,7 @@ void InterMemPreProc::precomputeFiniteMapTypes(CallSite &CS) {
   Graph &calleeG = ga.getSummaryGraph(*f_callee);
   SimulationMapper &sm = getSimulationCS(CS);
   NodeSet &safeCaller = getSafeNodesCallerCS(CS.getInstruction());
+  NodeSet &safeCallee = getSafeNodesCalleeCS(CS.getInstruction());
 
   // -- compute number of accesses to safe nodes
   RegionsMap &rm = m_irm[i];
@@ -386,16 +384,16 @@ void InterMemPreProc::precomputeFiniteMapTypes(CallSite &CS) {
 
   for (const Argument &a : f_callee->args()) {
     if (calleeG.hasCell(a))
-      recProcessNode(calleeG.getCell(a), safeCaller, sm, rm, nkm);
+      recProcessNode(calleeG.getCell(a), safeCallee, safeCaller, sm, rm, nkm);
   }
 
   for (auto &kv : calleeG.globals())
-    recProcessNode(*kv.second, safeCaller, sm, rm, nkm);
+    recProcessNode(*kv.second, safeCallee, safeCaller, sm, rm, nkm);
 
   if (calleeG.hasRetCell(*f_callee)) {
     const Cell &c = calleeG.getRetCell(*f_callee);
     if (c.getNode()->isModified())
-      recProcessNode(c, safeCaller, sm, rm, nkm);
+      recProcessNode(c, safeCallee, safeCaller, sm, rm, nkm);
   }
 }
 

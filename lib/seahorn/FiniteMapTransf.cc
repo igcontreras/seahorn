@@ -330,10 +330,8 @@ static Expr getValueAtDef(Expr map, Expr k, unsigned pos,
       return finite_map::fmapDefDefault(map)->left();
   } // already an expanded map term
 
-  return dsaIteSimplify(
-      zsimp.simplify(finite_map::mkGetVal(map, k))); // TODO: remove basic simplifier?
-
-  // return zsimp.simplify(finite_map::mkGetVal(map, k));
+  return zsimp.simplify(dsaIteSimplify(
+      finite_map::mkGetVal(map, k))); // TODO: remove basic simplifier?
 }
 
 static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
