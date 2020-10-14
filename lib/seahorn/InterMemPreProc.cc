@@ -138,13 +138,12 @@ static void computeSafeNodesSimulation(Graph &fromG, const Function &F,
 
   // ei.m_explColor has the nodes explored
   for (auto kv : ei.m_explColor) {
-    const Node *n = kv.first;
-    Node *n_caller = sm.get(*n).getNode();
-    if (isSafeNode(toUnsafe, n_caller)) {
-      assert(!isUnboundedMem(n, n_caller));
-      fromSafe.insert(n);
-      toSafe.insert(n_caller);
-    }
+    const Node *nFrom = kv.first;
+    Node *nTo = sm.get(*nFrom).getNode();
+    if (isSafeNode(toUnsafe, nTo))
+      toSafe.insert(nTo);
+    if(isSafeNode(fromUnsafe,nFrom))
+      fromSafe.insert(nFrom);
   }
 }
 } // namespace
