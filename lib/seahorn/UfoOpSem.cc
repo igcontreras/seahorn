@@ -1446,6 +1446,9 @@ void MemUfoOpSem::addMemSymbol(const Cell &c, Expr A, MemOpt ao) {
   LOG("inter_mem", errs() << "<-- addMemSymbol " << *A << "\n"
                           << " " << c.getNode() << " "
                           << m_preproc->getOffset(c) << "\n";);
+  if (ao == MemOpt::IN && map.count({c.getNode(), m_preproc->getOffset(c)}) > 0)
+    return;
+
   map.insert({{c.getNode(), m_preproc->getOffset(c)}, A});
 }
 
@@ -1948,14 +1951,14 @@ void FMapUfoOpSem::recAddSortedDef(const Expr map, const Expr def,
   added.insert(map); // mark now to avoid inserting it twice
   ExprSet deps;
   filter(
-      def, [](Expr e) { return finite_map::returnsFiniteMap(e); },
+      def->right(), [](Expr e) { return bind::isFiniteMapConst(e); },
       std::inserter(deps, deps.begin()));
 
-  for (auto m_it : deps) {
-    auto d_it = defs.find(map);
-    if (d_it != defs.end()) // defined earlier
+  for (Expr mapd : deps) {
+    auto d_it = defs.find(mapd);
+    if (d_it == defs.end()) // defined earlier
       continue;
-    recAddSortedDef(m_it, d_it->second, defs, added, side);
+    recAddSortedDef(mapd, d_it->second, defs, added, side);
   }
   side.push_back(def);
 }
@@ -1993,8 +1996,8 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCallee, Expr basePtrIn,
   const Cell &cCaller = simMap.get(cCallee);
   const Node *nCaller = cCaller.getNode();
 
-  if (m_preproc->getNumCIAccessesCellSummary(cCallee, &F) <= MaxKeys &&
-      m_preproc->isSafeNode(safeNodesCr, nCaller)) {
+  if (m_preproc->isSafeNode(safeNodesCr, nCaller) &&
+      (m_preproc->getNumCIAccessesCellSummary(cCallee, &F) <= MaxKeys)) {
     // -- copy accessed fields of the node
     for (auto field : cCallee.getNode()->types()) {
       unsigned offset = field.getFirst();
@@ -2005,7 +2008,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCallee, Expr basePtrIn,
       // -- if the field is represented with a
       // scalar, or it has 0 accesses skip the copy
       if (isMemScalar(cCallerField) ||
-          m_preproc->getNumCIAccessesCellSummary(cCalleeField, &F) == 0)
+          (m_preproc->getNumCIAccessesCellSummary(cCalleeField, &F) == 0))
         continue;
 
       if (hasOrigMemSymbol(cCallerField, MemOpt::IN)) {
@@ -2272,7 +2275,7 @@ void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
   const Cell &cSAS = sm.get(cBU);
   const Node *nSAS = cSAS.getNode();
   if (m_preproc->isSafeNode(safeNs, nSAS) &&
-      m_preproc->getNumAccesses(cSAS, &F) <= MaxKeys)
+      (m_preproc->getNumAccesses(cSAS, &F) <= MaxKeys))
     for (auto field : cBU.getNode()->types()) {
       unsigned offset = field.getFirst();
       Cell cBUField(cBU, offset);
