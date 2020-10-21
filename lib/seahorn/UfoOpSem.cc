@@ -1851,10 +1851,10 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     auto pair = cellToPair(regionCeCell);
     if (m_cellReplaceIn.count(pair) > 0) {
       csi.m_fparams[i] = m_cellReplaceIn[pair];
-      if (*r_it == *(r_it + 1)) {
+      if (m_cellReplaceOut.count(pair) > 0) {
         i++;
         r_it++;
-        csi.m_fparams[i] = m_cellReplaceOut[cellToPair(getCellValue(*r_it))];
+        csi.m_fparams[i] = m_cellReplaceOut[pair];
       }
     } else if (m_cellReplaceOut.count(pair) > 0) {
       csi.m_fparams[i] = m_cellReplaceOut[pair];

@@ -419,7 +419,7 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
 
   assert(mlDefk && isOpX<CONST_FINITE_MAP_KEYS>(mlDefk));
 
-  bool skipKs = (mlDefk == mrDefk);
+  bool skipKs = (mlDefk == mrDefk) || (mlDefk->arity() == 1);
   bool skipVs = (ml == mr);
 
   if (skipKs &&
