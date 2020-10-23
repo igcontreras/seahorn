@@ -589,15 +589,15 @@ static Expr mkSetDefCore(Expr defmap, Expr key, Expr v) {
 }
 
 // -- rewrites a map set primitive
-static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
+static Expr mkSetCore(Expr map, Expr key, Expr v, FMapExprsInfo &fmei) {
 
   LOG("fmap_transf", errs() << "-- mkSetCore " << *map << " " << *key << " "
-                            << *value << "\n";);
+                            << *v << "\n";);
 
   if (fmei.m_fmapDefk.count(map) == 0) {
     errs() << "undefined fmap " << *map << "\n";
     assert(false && "map definition not found");
-    return finite_map::set(map, key, value);
+    return finite_map::set(map, key, v);
   }
 
   Expr defmap = map;
@@ -605,7 +605,7 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
     defmap = fmei.m_fmapVarTransf[map];
 
   if (finite_map::isInitializedFiniteMap(defmap)) {
-    defmap = mkSetDefCore(defmap, key, value);
+    defmap = mkSetDefCore(defmap, key, v);
     if (defmap != nullptr) { // optimization could be done
       fmei.m_fmapDefk[defmap] = fmei.m_fmapDefk[map];
       fmei.m_type[defmap] = fmei.m_type[map];
@@ -617,13 +617,12 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
   Expr fmTy = fmei.m_type[map];
   Expr kTy = bind::rangeTy(bind::name(sort::finiteMapKeyTy(fmTy)->arg(0)));
 
-  Expr res = finite_map::mkSetVal(procMap, key, kTy, value);
+  Expr defk = isOpX<CONST_FINITE_MAP>(map) ? finite_map::fmapDefKeys(map)
+                                           : fmei.m_fmapDefk[map];
+  Expr res =
+      (defk->arity() == 1) ? v : finite_map::mkSetVal(procMap, key, kTy, v);
 
-  if (isOpX<CONST_FINITE_MAP>(map))
-    fmei.m_fmapDefk[res] = finite_map::fmapDefKeys(map);
-  else
-    fmei.m_fmapDefk[res] = fmei.m_fmapDefk[map];
-
+  fmei.m_fmapDefk[res] = defk;
   fmei.m_type[res] = fmTy;
 
   return res;
