@@ -419,7 +419,7 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
 
   assert(mlDefk && isOpX<CONST_FINITE_MAP_KEYS>(mlDefk));
 
-  bool skipKs = ((mlDefk == mrDefk) || (mlDefk->arity() == 1) );
+  bool skipKs = ((mlDefk == mrDefk) || (mlDefk->arity() == 1));
   bool skipVs = (ml == mr);
 
   if (skipKs &&
@@ -612,7 +612,6 @@ static Expr mkSetCore(Expr map, Expr key, Expr value, FMapExprsInfo &fmei) {
       return defmap;
     }
   }
-
   Expr procMap = mkFMapPrimitiveArgCore(map, fmei);
 
   Expr fmTy = fmei.m_type[map];
