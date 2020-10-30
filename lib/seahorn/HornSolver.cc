@@ -149,7 +149,7 @@ bool HornSolver::runOnModule(Module &M) {
   params.set(":xform.inline-linear", false);
   params.set(":xform.inline-eager", false);
   // -- disable propagate_variable_equivalences in tail_simplifier
-  params.set(":xform.tail_simplifier_pve", false);
+  params.set(":xform.tail_simplifier_pve", true);
   params.set(":xform.subsumption_checker", Subsumption);
   params.set(":spacer.order_children", HornChildren);
   params.set(":spacer.max_num_contexts", PdrContexts);

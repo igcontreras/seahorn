@@ -260,18 +260,17 @@ void InterMemPreProc::runOnFunction(const Function *F) {
                              simMap);
 
   // -- compute number of accesses to safe nodes
-  RegionsMap &rm = m_frm[F];
-  CellKeysMap &nkm = m_fnkm[F];
+  CellInfoMap &cim = m_fcim[F];
 
   for (const Argument &a : F->args())
     if (buG.hasCell(a))
-      recProcessNode(buG.getCell(a), safeBU, safeSAS, simMap, rm, nkm);
+      recProcessNode(buG.getCell(a), safeBU, safeSAS, simMap, cim);
 
   for (auto &kv : buG.globals())
-    recProcessNode(*kv.second, safeBU, safeSAS, simMap, rm, nkm);
+    recProcessNode(*kv.second, safeBU, safeSAS, simMap, cim);
 
   if (buG.hasRetCell(*F))
-    recProcessNode(buG.getRetCell(*F), safeBU, safeSAS, simMap, rm, nkm);
+    recProcessNode(buG.getRetCell(*F), safeBU, safeSAS, simMap, cim);
 }
 
 unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
@@ -284,17 +283,17 @@ unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
 }
 
 ExprVector &InterMemPreProc::getKeysCell(const Cell &c, const Function *f) {
-  assert(m_fnkm.count(f) > 0);
-  return findKeysCellMap(m_fnkm[f], c);
+  assert(m_fcim.count(f) > 0);
+  return m_fcim[f][cellToPair(c)].m_ks;
 }
 
 ExprVector &InterMemPreProc::getKeysCellSummary(const Cell &c,
                                                 const Function *f) {
   assert(m_smF.count(f) > 0);
   SimulationMapper &sm = m_smF[f];
-  const Cell nCI = sm.get(c);
+  const Cell cCI = sm.get(c);
 
-  return findKeysCellMap(m_fnkm[f], nCI);
+  return m_fcim[f][cellToPair(cCI)].m_ks;
 }
 
 // get from a map indexed by cell
@@ -320,8 +319,8 @@ ExprVector &InterMemPreProc::findKeysCellMap(CellKeysMap &map, const Cell &c) {
 void InterMemPreProc::recProcessNode(const Cell &cFrom,
                                      const NodeSet &fromSafeNodes,
                                      const NodeSet &toSafeNodes,
-                                     SimulationMapper &simMap, RegionsMap &rm,
-                                     CellKeysMap &nkm) {
+                                     SimulationMapper &simMap,
+                                     CellInfoMap &cim) {
 
   const Node *nFrom = cFrom.getNode();
   if (nFrom->types().empty() || !isSafeNode(fromSafeNodes, nFrom))
@@ -335,14 +334,11 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom,
       llvm::Optional<unsigned> opt_cellId = m_shadowDsa.getCellId(cToField);
       assert(opt_cellId.hasValue());
 
-      auto &m = nkm[cToField.getNode()];
-      ExprVector &ks = m[getOffset(cToField)];
-      Expr key = finite_map::tagCell(
-          bind::intConst(variant::variant(ks.size(), m_keyBase)),
-          opt_cellId.getValue(), cToField.getRawOffset());
-      ks.push_back(key);
-
-      rm[{cToField.getNode(), getOffset(cToField)}]++;
+      CellInfo &ci = cim[cellToPair(cToField)];
+      ci.m_ks.push_back(finite_map::tagCell(
+          bind::intConst(variant::variant(ci.m_ks.size(), m_keyBase)),
+          opt_cellId.getValue(), cToField.getRawOffset()));
+      ci.m_nks++;
     }
 
   if (nFrom->getLinks().empty())
@@ -350,14 +346,14 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom,
 
   // follow the pointers of the node
   for (auto &links : nFrom->getLinks())
-    recProcessNode(*links.second, fromSafeNodes, toSafeNodes, simMap, rm, nkm);
+    recProcessNode(*links.second, fromSafeNodes, toSafeNodes, simMap, cim);
 }
 
 ExprVector &InterMemPreProc::getKeysCellCS(const Cell &cCallee,
                                            const Instruction *i) {
-  CellKeysMap &nkmcs = m_inkm[i];
+  assert(m_icim.count(i) > 0);
   const Cell &cCaller = m_smCS[i].get(cCallee);
-  return nkmcs[cCaller.getNode()][getOffset(cCaller)];
+  return m_icim[i][cellToPair(cCaller)].m_ks;
 }
 
 void InterMemPreProc::precomputeFiniteMapTypes(CallSite &CS) {
@@ -375,24 +371,21 @@ void InterMemPreProc::precomputeFiniteMapTypes(CallSite &CS) {
   NodeSet &safeCallee = getSafeNodesCalleeCS(CS.getInstruction());
 
   // -- compute number of accesses to safe nodes
-  RegionsMap &rm = m_irm[i];
-  CellKeysMap &nkm = m_inkm[i];
-  // -- they need to be cleaned because UfoOpSem is run twice
-  rm.clear();
-  nkm.clear();
+  CellInfoMap &cim = m_icim[i];
+  cim.clear();
 
   for (const Argument &a : f_callee->args()) {
     if (calleeG.hasCell(a))
-      recProcessNode(calleeG.getCell(a), safeCallee, safeCaller, sm, rm, nkm);
+      recProcessNode(calleeG.getCell(a), safeCallee, safeCaller, sm, cim);
   }
 
   for (auto &kv : calleeG.globals())
-    recProcessNode(*kv.second, safeCallee, safeCaller, sm, rm, nkm);
+    recProcessNode(*kv.second, safeCallee, safeCaller, sm, cim);
 
   if (calleeG.hasRetCell(*f_callee)) {
     const Cell &c = calleeG.getRetCell(*f_callee);
     if (c.getNode()->isModified())
-      recProcessNode(c, safeCallee, safeCaller, sm, rm, nkm);
+      recProcessNode(c, safeCallee, safeCaller, sm, cim);
   }
 }
 

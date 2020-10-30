@@ -115,3 +115,12 @@ private:
 };
 
 } // namespace seahorn
+
+// shared with FMapOpSemTransf
+namespace seahorn {
+namespace fmap_transf {
+Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei);
+Expr mkGetDefCore(Expr defmap, Expr key);
+Expr mkSetDefCore(Expr defmap, Expr key, Expr v);
+} // namespace fmap_transf
+} // namespace seahorn

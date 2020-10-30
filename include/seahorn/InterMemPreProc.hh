@@ -9,6 +9,12 @@
 
 namespace seahorn {
 
+struct CellInfo {
+  unsigned m_nks = 0;
+  unsigned m_nacss = 0;
+  expr::ExprVector m_ks;
+};
+
 using CellKeysMap =
     llvm::DenseMap<const seadsa::Node *,
                    std::unordered_map<unsigned, expr::ExprVector>>;
@@ -33,22 +39,17 @@ private:
   SimMapperFMap m_smF;
 
   using NodesCSMap = llvm::DenseMap<const llvm::Instruction *, NodeSet>;
-
   NodesCSMap m_safen_cs_callee; // set of unsafe nodes in the callee of callsite
   NodesCSMap m_safen_cs_caller; // set of unsafe nodes in the caller of callsite
 
   using NodeFMap = llvm::DenseMap<const llvm::Function *, NodeSet>;
-
   NodeFMap m_safeSASF;
   NodeFMap m_safeBUF;
 
-  using RegionsMap =
-      llvm::DenseMap<std::pair<const seadsa::Node *, unsigned>, unsigned>;
-  llvm::DenseMap<const llvm::Function *, RegionsMap> m_frm;
-  llvm::DenseMap<const llvm::Instruction *, RegionsMap> m_irm; // callsites
-
-  llvm::DenseMap<const llvm::Function *, CellKeysMap> m_fnkm;
-  llvm::DenseMap<const llvm::Instruction *, CellKeysMap> m_inkm; // callsites
+  using CellInfoMap =
+      llvm::DenseMap<std::pair<const seadsa::Node *, unsigned>, CellInfo>;
+  llvm::DenseMap<const llvm::Function *, CellInfoMap> m_fcim;
+  llvm::DenseMap<const llvm::Instruction *, CellInfoMap> m_icim; // callsites
 
   expr::ExprFactory &m_efac;
   // -- constant base for keys
@@ -93,11 +94,11 @@ public:
   NodeSet &getSafeNodesBU(const Function *f) { return m_safeBUF[f]; }
 
   unsigned getNumAccesses(const Cell &c, const Function *f) {
-    assert(m_frm.count(f) > 0);
-    if (m_frm[f].count({c.getNode(), getOffset(c)}) == 0)
+    assert(m_fcim.count(f) > 0);
+    if (m_fcim[f].count({c.getNode(), getOffset(c)}) == 0)
       return 0;
     else
-      return m_frm[f][{c.getNode(), getOffset(c)}];
+      return m_fcim[f][{c.getNode(), getOffset(c)}].m_nks;
   }
 
   unsigned getNumCIAccessesCellSummary(const Cell &c, const Function *f);
@@ -108,10 +109,14 @@ public:
 
   void precomputeFiniteMapTypes(CallSite &CS);
 
+  inline std::pair<const Node *, unsigned> cellToPair(const Cell &c) {
+    return std::make_pair(c.getNode(), getOffset(c));
+  }
+
 private:
   void recProcessNode(const Cell &cFrom, const NodeSet &fromSafeNodes,
                       const NodeSet &toSafeNodes, SimulationMapper &simMap,
-                      RegionsMap &rm, CellKeysMap &nkm);
+                      CellInfoMap &cim);
   template <typename ValueT>
   ValueT &findCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT> &map,
                       const Cell &c);

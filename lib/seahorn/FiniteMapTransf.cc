@@ -42,7 +42,6 @@ void mkVarsMap(Expr mapConst, Expr map, const Range &keys, int nKs, Expr kTy,
   Expr v, key;
   ExprVector map_values(nKs), map_keys(nKs);
   auto v_it = map_values.begin(), k_it = map_keys.begin();
-  Expr mapName = bind::name(bind::fname(mapConst));
 
   if (nKs == 1) {
     Expr k = *keys.begin();
@@ -103,9 +102,7 @@ static Expr mkFappArgsCore(Expr fapp, Expr newFdecl, ExprVector &extraUnifs,
         // if there is no name, we create a variant with the name of the
         // function, make new variable (same as normalization)
       }
-
-      // Expr ksTy = sort::finiteMapKeyTy(argTy);
-      // the keys have to be obtained from the const, not the type. The Dsa info
+      // the keys are obtained from the const, not the type. The Dsa info
       // of the type is relative to the function (context insensitive), the Dsa
       // info on the type of the const is relative to the calling context.
       auto keys = llvm::make_range(ksTy->args_begin(), ksTy->args_end());
