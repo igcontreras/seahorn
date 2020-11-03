@@ -122,5 +122,7 @@ namespace fmap_transf {
 Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei);
 Expr mkGetDefCore(Expr defmap, Expr key);
 Expr mkSetDefCore(Expr defmap, Expr key, Expr v);
+Expr mkInlineDefs(Expr def, ExprMap defmap);
+void insertVarsDef(Expr defmap, ExprSet &vars);
 } // namespace fmap_transf
 } // namespace seahorn

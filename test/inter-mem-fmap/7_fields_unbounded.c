@@ -56,7 +56,7 @@ int main() {
   assume(&l1 + sizeof(List) < &l2);
   // this assume is needed for unsat, is there an option to make it automatic?
 
-  push_elem(&l2, 42);
+  push_elem(&l1, 42);
 
   sassert(l1.sz <= l1.cap);
 

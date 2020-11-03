@@ -11,6 +11,8 @@
 #include "seahorn/Expr/ExprOpCompare.hh"
 #include "seahorn/Expr/ExprOpSort.hh"
 
+#include "seahorn/FiniteMapTransf.hh"
+
 namespace expr {
 
 namespace op {
@@ -189,6 +191,9 @@ inline Expr constFiniteMap(const Range1 &keys, Expr def, const Range2 &values) {
                               constFiniteMapValues(values));
 }
 
+inline bool isFmapVal(Expr fmap) {
+  return isOpX<CONST_FINITE_MAP>(fmap);
+}
 inline Expr fmapDefKeys(Expr fmap) { return fmap->left(); }
 
 inline Expr fmapDefDefault(Expr fmap) {
@@ -208,8 +213,29 @@ inline bool isInitializedFiniteMap(Expr m) {
   return false;
 }
 
-inline Expr get(Expr map, Expr idx) { return mk<GET>(map, idx); }
-inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
+inline Expr get(Expr map, Expr idx) {
+  Expr get = nullptr;
+  if(isOpX<CONST_FINITE_MAP>(map)) // get over fmap val
+    get = seahorn::fmap_transf::mkGetDefCore(map, idx);
+
+  if(get)
+    return get;
+
+  return mk<GET>(map, idx);
+}
+
+// inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
+inline Expr set(Expr map, Expr idx, Expr v) {
+
+  Expr set = nullptr;
+  if(isOpX<CONST_FINITE_MAP>(map)) // set over fmap val
+    set = seahorn::fmap_transf::mkSetDefCore(map, idx, v);
+
+  if(set)
+    return set;
+  else
+    return mk<SET>(map, idx, v);
+}
 
 inline Expr constrainKeys(Expr map1, Expr map2) {
   return mk<SAME_KEYS>(map1, map2);
@@ -300,20 +326,6 @@ inline Expr mkInitializedMap(const Range &keys, Expr kTy, const Range &values,
   //
   // l1 x.(v1)
   // ln x.(ite (x == n) vn (ln-1 x))
-  // for (auto v : values)
-  //   lmdMap =
-  //       boolop::lite(mk<EQ>(y, mkTerm<mpz_class>(count++, efac)), v, lmdMap);
-
-  // auto v_it = values.begin();
-  // auto k_it = keys.begin();
-
-  // Expr lmdMap = *v_it;
-  // v_it++;
-  // k_it++;
-  // for ( ; k_it!= keys.end() ; k_it++, v_it++) {
-  //   lmdMap = boolop::lite(mk<EQ>(y, *k_it), *v_it, lmdMap);
-  // }
-
   auto v_it = --values.end();
   auto k_it = --keys.end();
 
@@ -335,7 +347,6 @@ inline Expr mkInitializedMap(const Range &keys, Expr kTy, const Range &values,
 //      `key` is an expression of type int or bv
 inline Expr mkGetVal(Expr lmdMap, Expr lmdKeys, Expr key) {
 
-  // assert(isOpX<LAMBDA>(lmdMap));
   // lmdMap may be a lambda or the default value: a number or a const.
   assert(isOpX<LAMBDA>(lmdKeys));
 
@@ -353,7 +364,6 @@ inline Expr mkGetVal(Expr lmdMap, Expr key) {
 
 inline Expr mkGetPosKey(Expr lmdKeys, Expr key) {
 
-  // assert(isOpX<LAMBDA>(lmdKeys));
   if (!isOpX<LAMBDA>(lmdKeys))
     return lmdKeys;
   else
@@ -459,7 +469,43 @@ inline Expr mkCellTag(unsigned id1, unsigned id2, ExprFactory &efac) {
 
 inline Expr tagCell(Expr base, unsigned cellId, unsigned offset) {
   Expr cellE = mkCellTag(cellId, offset, base->efac());
-  return bind::mkConst(variant::tag(base, cellE), bind::rangeTy(bind::fname(base)));
+  return bind::mkConst(variant::tag(base, cellE),
+                       bind::rangeTy(bind::fname(base)));
+}
+
+inline Expr mkVarKey(Expr mapConst, Expr k, Expr kTy) {
+  return bind::mkConst(variant::variant(0, variant::tag(mapConst, k)), kTy);
+}
+
+// -- creates a constant with the name get(map,k)
+// also used in FinteMapBodyVisitor
+inline Expr mkVarGet(Expr mapConst, Expr k, Expr vTy) {
+  return bind::mkConst(variant::variant(0, finite_map::get(mapConst, k)), vTy);
+}
+
+inline Expr mkDefault(Expr base, Expr vTy) {
+  return bind::mkConst(variant::tag(base, mkTerm<mpz_class>(0, vTy->efac())),
+                       vTy);
+}
+
+inline Expr mkVal(Expr mapConst) {
+  Expr fmapTy = bind::rangeTy(bind::name(mapConst));
+
+  Expr vTy = sort::finiteMapValTy(fmapTy);
+  Expr ksTy = sort::finiteMapKeyTy(fmapTy);
+  Expr kTy = bind::rangeTy(bind::name(ksTy->arg(0)));
+
+  ExprVector keys(ksTy->arity());
+  ExprVector values(ksTy->arity());
+
+  auto k_it = keys.begin();
+  auto v_it = values.begin();
+  for (auto kTy_it = ksTy->args_begin() ; kTy_it != ksTy->args_end() ; kTy_it++) {
+    *k_it++ = mkVarKey(mapConst, *kTy_it, kTy);
+    *v_it++ = mkVarGet(mapConst, *kTy_it, vTy);
+  }
+
+  return constFiniteMap(keys, mkDefault(mapConst, vTy), values);
 }
 
 } // namespace finite_map

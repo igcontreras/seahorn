@@ -3,6 +3,8 @@
 #include "seahorn/Support/SeaDebug.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "seahorn/Expr/ExprOpFiniteMap.hh"
+
 namespace seahorn {
 /// true if v is a constant value
 static bool isValue(Expr v) {
@@ -69,15 +71,12 @@ Expr SymStore::havoc(Expr key) {
         kids.push_back(this->havoc(fld));
       }
       val = strct::mk(kids);
-    } //  else if (bind::isFiniteMapConst(key)) {
-    //   // special case: key of sort finite map -> create an fmap value
-    //   Expr fmTy = bind::rangeTy(bind::fname(key));
-    //   for (auto k : keys) {
-    //     key = mkVarKey(mapConst, k, kTy);
-    //     v = mkVarGet(mapConst, k, vTy);
-    //   }
-    // }
-    else {
+    }  else if (bind::isFiniteMapConst(key)) {
+      // special case: key of sort finite map -> create an fmap value
+      val = at(key);
+      if(!val)
+        val = finite_map::mkVal(key);
+    } else {
       // -- the usual case, either create a new value or update an old one
       val = at(key);
       Expr fdecl = val ? bind::fname(val) : bind::fname(key);

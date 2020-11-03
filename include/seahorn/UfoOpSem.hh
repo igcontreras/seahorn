@@ -9,6 +9,7 @@
 
 #include "seadsa/ShadowMem.hh"
 #include "seahorn/InterMemPreProc.hh"
+// #include "seahorn/FMapOpSemTransf.hh"
 
 namespace llvm {
 class GetElementPtrInst;
@@ -164,7 +165,7 @@ protected:
   // \brief true if `c` is encoded with a scalar variable
   bool isMemScalar(const Cell &c);
   inline std::pair<const Node *, unsigned> cellToPair(const Cell &c) {
-    return std::make_pair(c.getNode(), m_preproc->getOffset(c));
+    return m_preproc->cellToPair(c);
   }
 
 private:
@@ -200,9 +201,10 @@ public:
                std::shared_ptr<InterMemPreProc> preproc,
                TrackLevel trackLvl = MEM,
                FunctionPtrSet abs_fns = FunctionPtrSet(), ShadowMem *dsa = NULL)
-      : MemUfoOpSem(efac, pass, dl, preproc, trackLvl, abs_fns, dsa) {
+      : MemUfoOpSem(efac, pass, dl, preproc, trackLvl, abs_fns, dsa)
+  {
     m_keyBase = mkTerm<std::string>("k", efac);
-    m_fmapDefault = mkTerm<expr::mpz_class>(0UL, m_efac);
+    m_fmDefault = mkTerm<expr::mpz_class>(0UL, m_efac);
   }
 
   Expr symb(const Value &v) override;
@@ -216,11 +218,14 @@ protected:
   void addMemSymbol(const seadsa::Cell &c, Expr A, MemOpt ao) override;
 
 private:
-  // using FMapExprMap = std::unordered_map<Expr, ExprVector>;
-  // // -- Expr needs to be replaced by a map with the keys in this std::map
-  // FMapExprMap m_fmKeys;
-  // // -- Expr needs to be replaced by a map with the values in this std::map
-  // FMapExprMap m_fmValues;
+  // FMOpSemTransf m_fmt;
+
+  // hides how the memory is split
+  using FMapExprMap = std::map<Expr, ExprVector>;
+  // -- Expr needs to be replaced by a map with the keys in this std::map
+  FMapExprMap m_fmKeys;
+  // -- Expr needs to be replaced by a map with the values in this std::map
+  FMapExprMap m_fmValues;
 
   // -- Additional store operations for the out memories (copy back)
   ExprMap m_fmOut;
@@ -235,7 +240,8 @@ private:
       std::map<std::pair<const seadsa::Node *, unsigned>, ExprVector>;
   CellExprVectorMap m_cellKeysIn;
   CellExprVectorMap m_cellKeysOut;
-  CellExprVectorMap m_cellValues;
+  CellExprVectorMap m_cellValuesIn;
+  CellExprVectorMap m_cellValuesOut;
 
   // -- store the cell that corresponds to an expression
   using ExprCellMap = std::map<Expr, std::pair<const seadsa::Node *, unsigned>>;
@@ -245,7 +251,7 @@ private:
   // -- constant base for keys
   Expr m_keyBase;
   // -- default value for uninitialized values of maps
-  Expr m_fmapDefault;
+  Expr m_fmDefault;
 
   Instruction *m_csInst; // callsite that we are processing
 
@@ -257,39 +263,38 @@ private:
   using FunctionCellExprMap = std::map<const Function *, CellExprMap>;
   FunctionCellExprMap m_fInitSymNodes;
 
-  void VCgenCell(const Cell &cArgCe, Expr basePtr, const NodeSet &unsafeCeNodes,
-                 const NodeSet &unsafeCrNodes, SimulationMapper &sm,
-                 const Function &F);
-
   void recVCGenMem(const Cell &c_callee, Expr ptrInt, Expr ptrOut,
                    const NodeSet &safeNodesCe, const NodeSet &safeNodesCr,
                    SimulationMapper &simMap, const Function &F);
 
   Expr fmVariant(Expr e, const ExprVector &keys);
   void addKeyValCell(const Cell &cCr, const Cell &cCe, Expr basePtr,
-                     unsigned offset, MemOpt ao);
+                     unsigned offset);
   void storeVal(const Cell &cCr, const Cell &cSAS, Expr readFrom, Expr basePtr,
                 unsigned offset);
 
-  // creates an ExprVector if not initialized already
-  ExprVector &getCellKeys(const Cell &c, MemOpt ao) {
-    auto &map = (ao == MemOpt::IN) ? m_cellKeysIn : m_cellKeysOut;
-    return map[cellToPair(c)];
-  }
-
-  ExprVector &getCellKeys(std::pair<const seadsa::Node *, unsigned> &cp, MemOpt ao) {
+  // -- creates an ExprVector if not initialized already
+  ExprVector &getCellKeys(std::pair<const seadsa::Node *, unsigned> &cp,
+                          MemOpt ao) {
     auto &map = (ao == MemOpt::IN) ? m_cellKeysIn : m_cellKeysOut;
     return map[cp];
   }
 
-  ExprVector &getCellValues(const Cell &c) {
-    return m_cellValues[cellToPair(c)];
+  ExprVector &getCellKeys(const Cell &c, MemOpt ao) {
+    auto cp = cellToPair(c);
+    return getCellKeys(cp, ao);
   }
 
-  ExprVector &getCellValues(std::pair<const seadsa::Node *, unsigned> &cp) {
-    return m_cellValues[cp];
+  ExprVector &getCellValues(std::pair<const seadsa::Node *, unsigned> &cp,
+                            MemOpt ao) {
+    auto &map = (ao == MemOpt::IN) ? m_cellValuesIn : m_cellValuesOut;
+    return map[cp];
   }
 
+  ExprVector &getCellValues(const Cell &c, MemOpt ao) {
+    auto cp = cellToPair(c);
+    return getCellValues(cp, ao);
+  }
 
   Expr memObtainValue(Expr mem, Expr offset);
   Expr memSetValue(Expr mem, Expr offset, Expr v);
@@ -300,20 +305,17 @@ private:
                                SimulationMapper &sm, CellKeysMap &nkm,
                                CellExprMap &nim);
 
-  void recAddSortedDef(const Expr map, const Expr def, const ExprMap &defs,
-                       ExprSet &added, ExprVector &side);
+  void recAddSortedDef(const Expr map, const Expr def, ExprMap &defs,
+                       ExprSet &added, ExprVector &side, SymStore &s);
   void storeSymInitInstruction(Instruction *I, CellExprMap &nim, Expr memE);
 
-  bool processedCellKeysFunction(const Function &F) {
-    return m_fCellKeysM.count(&F) > 0;
-  }
   CellKeysMap &getCellKeysFunction(const Function &F) {
     return m_fCellKeysM[&F]; // creates it if it doesn't exist
   }
 
-  bool hasNodeSymFunction(const Function &F) {
-    return m_fInitSymNodes.count(&F) > 0;
-  }
+  // bool hasNodeSymFunction(const Function &F) {
+  //   return m_fInitSymNodes.count(&F) > 0;
+  // }
   CellExprMap &getNodeSymFunction(const Function &F) {
     return m_fInitSymNodes[&F]; // creates it if it
                                 // doesn't exist
