@@ -203,7 +203,7 @@ add_lit_testsuite(test-inter-mem "Tests for inter-mem encoding"
 add_lit_testsuite(test-inter-mem-fmap "Tests for inter-mem with fmaps encoding"
   -v
   -j1
-  ${CMAKE_CURRENT_SOURCE_DIR}/inter-mem/fmaps
+  ${CMAKE_CURRENT_SOURCE_DIR}/inter-mem-fmap
   ARGS
   --path=${CMAKE_INSTALL_PREFIX}/bin
   DEPENDS seahorn
