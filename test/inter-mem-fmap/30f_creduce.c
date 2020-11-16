@@ -1,29 +1,32 @@
-// RUN: sea pf -O0 --dsa=sea-cs --horn-vcgen-use-ite --horn-array-global-constraints --horn-use-write=false  --horn-global-constraints --horn-shadow-mem-optimize=false --horn-inter-proc-mem-fmaps --horn-fmap-max-keys=5 %s
+// RUN: sea pf -O0 --dsa=sea-cs --horn-vcgen-use-ite --horn-array-global-constraints --horn-use-write=false  --horn-global-constraints --horn-shadow-mem-optimize=false --horn-inter-proc-mem-fmaps --horn-fmap-max-keys=5 --no-lower-gv-init-structs %s
 // CHECK: ^unsat$
 
+void __VERIFIER_error();
 struct a {};
 union b {
   struct a c;
-  int d
+  int d;
 };
 struct {
-  union b e
+  union b e;
 } f = {{}};
 struct aa {
-  void *g
+  void *g;
 };
 struct ab {
-  int h
+  int h;
 };
 struct i {
-  char ac
+  char ac;
 };
 struct j {
-  struct i *ae
+  struct i *ae;
 } * l;
-k, n;
-m(int);
-o(struct aa *p) {
+int k, n;
+int m(int);
+int s(int);
+
+int o(struct aa *p) {
   char q;
   int a, r;
   s(r);
@@ -34,9 +37,8 @@ o(struct aa *p) {
   u(n, s, "");
   l->ae->ac = 0;
 }
-v(struct aa *p) {
+int v(struct aa *p) {
   struct j *w = p->g = &w;
-  u();
   struct ab *b;
   b->h = o;
   __VERIFIER_error();
