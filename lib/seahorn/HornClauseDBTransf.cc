@@ -147,58 +147,6 @@ void removeFiniteMapsHornClausesTransf(HornClauseDB &db, HornClauseDB &tdb,
 
   Stats::stop("FiniteMapTransfArgs");
 
-  Stats::start("FiniteMapTransfBody");
-  // Remove Finite Maps from Bodies
-  std::vector<HornRule> worklist;
-  boost::copy(tdb.getRules(), std::back_inserter(worklist));
-
-  ZSimplifier<EZ3> zsimp(zctx);
-  zsimp.params().set("pull_cheap_ite", true);
-  zsimp.params().set("ite_extra_rules", true);
-  zsimp.params().set("flat", false);
-  zsimp.params().set("som", false);
-
-  LOG("print_fmap_body_clauses",
-      errs() << "------- FMAPS NO ARGS CLAUSE DB ------\n";);
-
-  for (auto rule : worklist) {
-    ExprVector vars = rule.vars();
-    ExprSet allVars(vars.begin(), vars.end());
-
-    DagVisitCache dvc;
-    FiniteMapBodyVisitor fmv(allVars, efac, zsimp);
-
-    LOG("print_fmap_body_clauses", errs() << *rule.get() << "\n\n";);
-
-    Expr body = visit(fmv, rule.body(), dvc);
-
-    ExprSet newVars;
-    copy_if(allVars, newVars, [](Expr expr) { // not finite map
-      return !bind::isFiniteMapConst(expr);
-    });
-
-    HornRule newRule(newVars, rule.head(), body);
-
-    LOG(
-        "fmap_check_types", errs() << "Transforming: " << *rule.get() << "\n";
-        if (tc.typeOf(rule.get()) == sort::errorTy(efac)) {
-          errs() << *tc.getErrorExp() << "\n";
-        } errs()
-        << "Transformed: " << *newRule.get() << "\n";
-        if (tc.typeOf(newRule.get()) == sort::errorTy(efac)) {
-          errs() << *tc.getErrorExp() << "\n";
-        });
-
-    tdb.removeRule(rule);
-    tdb.addRule(newRule);
-  }
-
-  LOG("print_clauses", errs() << "------- TRANSFORMED CLAUSE DB ------\n";
-      for (auto &cl
-           : tdb.getRules()) cl.get()
-          ->dump(););
-  Stats::stop("FiniteMapTransfBody");
-
   if (FmapSimplify) {
 
     EZ3 z3(efac);

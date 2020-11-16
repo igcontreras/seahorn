@@ -307,8 +307,8 @@ private:
                                SimulationMapper &sm, CellKeysMap &nkm,
                                CellExprMap &nim);
 
-  void recAddSortedDef(const Expr map, const Expr def, ExprMap &defs,
-                       ExprSet &added, ExprVector &side, SymStore &s);
+  void recInlineDefs(const Expr map, const Expr def, ExprMap &defs,
+                     ExprSet &added, SymStore &s);
   void storeSymInitInstruction(Instruction *I, CellExprMap &nim, Expr memE);
 
   CellKeysMap &getCellKeysFunction(const Function &F) {

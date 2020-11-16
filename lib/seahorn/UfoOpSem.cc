@@ -1050,9 +1050,14 @@ struct OpSemPhiVisitor : public InstVisitor<OpSemPhiVisitor>, OpSemBase {
       if (!m_sem.isTracked(phi))
         continue;
       Expr lhs = havoc(phi);
-      Expr act = GlobalConstraints ? trueE : m_activeLit;
+      Expr act = GlobalConstraints ? trueE : m_activeLit; // TODO: unused?
       Expr op0 = ops[i++];
-      side(lhs, op0);
+
+      if (finite_map::returnsFiniteMap(op0)) {
+        write(phi, op0);
+      } else {
+        side(lhs, op0);
+      }
     }
   }
 }; // OpSemPhiVisitor
@@ -1888,7 +1893,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     extraDefs[fmap] =
         finite_map::constFiniteMap(getCellKeys(cellP, MemOpt::IN), m_fmDefault,
                                    getCellValues(cellP, MemOpt::IN));
-    errs() << "new def: " << *fmap << " = " << *extraDefs[fmap] << "\n";
+    // errs() << "new def: " << *fmap << " = " << *extraDefs[fmap] << "\n";
   }
 
   for (auto &kv : m_cellReplaceOut) {
@@ -1903,12 +1908,12 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
                                0, intTy);
     }
     extraDefs[fmap] = finite_map::constFiniteMap(ks, m_fmDefault, values);
-    errs() << "new def: " << *fmap << " = " << *extraDefs[fmap] << "\n";
+    // errs() << "new def: " << *fmap << " = " << *extraDefs[fmap] << "\n";
   }
 
   ExprSet added; // stores the definitions already added
   for (auto &kv : extraDefs)
-    recAddSortedDef(kv.first, kv.second, extraDefs, added, side, s);
+    recInlineDefs(kv.first, kv.second, extraDefs, added, s);
 
   auto r_it = fi.regions.begin();
   auto v_it = csi.m_modValues.begin();
@@ -1922,17 +1927,17 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     auto pair = cellToPair(regionCeCell);
     if (m_cellReplaceIn.count(pair) > 0) { // input param
       csi.m_fparams[i] = extraDefs[m_cellReplaceIn[pair]];
-      errs() << " [IN] replaced " << *param << " by: " << *csi.m_fparams[i]
-             << "\n";
+      // errs() << " [IN] replaced " << *param << " by: " << *csi.m_fparams[i]
+      //        << "\n";
       if (m_cellReplaceOut.count(pair) > 0) { // output of input param
         i++;
         r_it++;
         v_it++;
-        errs() << " [IN-OUT] replaced " << *csi.m_fparams[i] << " by: ";
+        // errs() << " [IN-OUT] replaced " << *csi.m_fparams[i] << " by: ";
         Expr cellE = m_cellReplaceOut[pair];
         param = csi.m_fparams[i];
         csi.m_fparams[i] = extraDefs[cellE];
-        errs() << *csi.m_fparams[i] << "\n";
+        // errs() << *csi.m_fparams[i] << "\n";
         if (m_fmOut.count(param) > 0) {
           // there may not be fmOut if nodes are split
           Expr extra = fmap_transf::mkInlineDefs(m_fmOut[param], extraDefs);
@@ -1953,7 +1958,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
         else
           arrayStores.push_back(mk<EQ>(param, extra));
       }
-      errs() << " [OUT] replaced " << *csi.m_fparams[i] << " by: ";
+      // errs() << " [OUT] replaced " << *csi.m_fparams[i] << " by: ";
     } else if (finite_map::returnsFiniteMap(param) && // unused param
                isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)))
     // +1 because fi.sumpPred->arg(0) is the function name
@@ -1964,14 +1969,14 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       // -- create a fresh array (not reachable in the callee bu)
       csi.m_fparams[i] =
           bind::mkConst(variant::variant(0, param), fi.sumPred->arg(i + 1));
-      errs() << " [CONST] replaced " << *param << " by: " << *csi.m_fparams[i]
-             << "\n";
+      // errs() << " [CONST] replaced " << *param << " by: " << *csi.m_fparams[i]
+      //        << "\n";
       const Node *nOut = m_exprCell[param].first;
       if (!nOut->isRead() && nOut->isModified() &&
           bind::isFiniteMapConst(param)) {
         csi.m_fparams[i] = extraDefs[m_cellReplaceOut[pair]];
-        errs() << " [ONLY OUT] replaced " << *param
-               << " by: " << *csi.m_fparams[i] << "\n";
+        // errs() << " [ONLY OUT] replaced " << *param
+        //        << " by: " << *csi.m_fparams[i] << "\n";
       } else if (i < csi.m_fparams.size()) { // output of unused param
         Expr nextParam = csi.m_fparams[i + 1];
         if (*r_it == *(r_it + 1)) {
@@ -1986,8 +1991,8 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
           assert(isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)));
           csi.m_fparams[i] = bind::mkConst(variant::variant(0, nextParam),
                                            fi.sumPred->arg(i + 1));
-          errs() << " [NOT RELEVANT] replaced " << *nextParam
-                 << " by: " << *csi.m_fparams[i] << "\n";
+          // errs() << " [NOT RELEVANT] replaced " << *nextParam
+          //        << " by: " << *csi.m_fparams[i] << "\n";
         }
       }
     } // TODO: increment v_it for arrays
@@ -2023,9 +2028,9 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   m_cellValuesIn.clear();
 } // namespace seahorn
 
-void FMapUfoOpSem::recAddSortedDef(const Expr map, const Expr def,
+void FMapUfoOpSem::recInlineDefs(const Expr map, const Expr def,
                                    ExprMap &defs, ExprSet &added,
-                                   ExprVector &side, SymStore &s) {
+                                   SymStore &s) {
 
   if (added.count(map) > 0)
     return;
@@ -2041,7 +2046,7 @@ void FMapUfoOpSem::recAddSortedDef(const Expr map, const Expr def,
     if (d_it ==
         defs.end()) // defined earlier // TODO: this should not happen now
       continue;
-    recAddSortedDef(mapd, d_it->second, defs, added, side, s);
+    recInlineDefs(mapd, d_it->second, defs, added, s);
   }
 
   Expr inlinedDef = fmap_transf::mkInlineDefs(def, defs);
@@ -2338,9 +2343,12 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
 
   // add definitions in an ordered way
   ExprSet added;
-  for (auto kv : defs) {
-    recAddSortedDef(kv.first, kv.second, defs, added, side, s);
-  }
+  for (auto kv : defs)
+    recInlineDefs(kv.first, kv.second, defs, added, s);
+
+  for(auto kv: defs)
+    side.push_back(fmap_transf::mkSameKeysCore(kv.second));
+
   LOG("fmaps_mem_init", errs()
                             << "--- end inits for: " << F.getName() << "\n";);
 }

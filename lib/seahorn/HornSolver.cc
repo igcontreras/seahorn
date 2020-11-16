@@ -155,7 +155,7 @@ bool HornSolver::runOnModule(Module &M) {
   params.set(":spacer.max_num_contexts", PdrContexts);
   params.set(":spacer.elim_aux", true);
   params.set(":spacer.reach_dnf", true);
-  params.set ("print_statistics", true);
+  params.set("print_statistics", true);
   params.set(":spacer.use_bg_invs", UseInvariant == solver_detail::INACTIVE ||
                                         UseInvariant == solver_detail::BG_ONLY);
   params.set(":spacer.weak_abs", WeakAbs);
@@ -295,23 +295,8 @@ static Expr processFmaps(Expr bbfapp, HornDbModel &model) {
   ExprSet allVars; // not really necessary
   predDeclTransf[bbPredDecl] = bbPredTDecl;
   FiniteMapArgsVisitor fmav(allVars, predDeclTransf, bbfapp->efac());
-  // some fmap was removed
-  Expr bbfappAndT = visit(fmav, bbfapp);
 
-  Expr invar;
-  if (isOpX<AND>(bbfappAndT)) // some expansion happened
-    invar = model.getDef(bbfappAndT->last());
-  else
-    invar = model.getDef(bbfapp);
-
-  // do not print full fmaps
-  // if(!isOpX<TRUE>(invar)){
-  //   outs() << *bbfapp << " where:\n";
-  //   auto arg_it = bbfappAndT->args_begin();
-  //   for (; arg_it != bbfappAndT->args_end() -1 ; arg_it++)
-  //     outs()  << "\t" << **arg_it << "\n";
-  // }
-  return invar;
+  return model.getDef(visit(fmav, bbfapp));
 }
 
 void HornSolver::printInvars(Function &F, HornDbModel &model) {
@@ -336,12 +321,8 @@ void HornSolver::printInvars(Function &F, HornDbModel &model) {
     const ExprVector &live = hm.live(BB);
     // Expr invars = fp.getCoverDelta (bind::fapp (bbPred, live));
     Expr bbfapp = bind::fapp(bbPred, live);
-
-    Expr invars;
-    if (InterProcMemFmaps)
-      invars = processFmaps(bbfapp, model);
-    else
-      invars = model.getDef(bbfapp);
+    Expr invars = InterProcMemFmaps ? processFmaps(bbfapp, model)
+                                    : invars = model.getDef(bbfapp);
 
     if (isOpX<AND>(invars)) {
       outs() << "\n";

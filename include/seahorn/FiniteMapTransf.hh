@@ -129,6 +129,7 @@ Expr mkSetDefCore(Expr defmap, Expr key, Expr v);
 Expr mkSetCore(Expr fm, Expr key, Expr v);
 Expr mkIteDefCore(Expr cond, Expr fm1, Expr fm2);
 Expr mkIteCore(Expr cond, Expr fm1, Expr fm2);
+Expr mkSameKeysCore(Expr e);
 Expr mkInlineDefs(Expr def, ExprMap defmap);
 void insertVarsDef(Expr defmap, ExprSet &vars);
 } // namespace fmap_transf
