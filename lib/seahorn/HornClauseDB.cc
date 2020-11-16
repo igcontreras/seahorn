@@ -138,6 +138,7 @@ Expr getLemmas(const LemmaMap &m, const ExprSet &rels, Expr pred) {
 }
 
 void HornClauseDB::addConstraint(Expr pred, Expr lemma) {
+  return;
   addLemma(m_constraints, m_rels, pred, lemma);
 }
 
