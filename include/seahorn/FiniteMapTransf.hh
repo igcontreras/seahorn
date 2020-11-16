@@ -120,8 +120,15 @@ private:
 namespace seahorn {
 namespace fmap_transf {
 Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei);
+Expr replaceDefKeys(Expr defmap, Expr keys);
+template <typename Range>
+Expr replaceDefValues(Expr defmap, const Range &values);
 Expr mkGetDefCore(Expr defmap, Expr key);
+Expr mkGetCore(Expr fm, Expr key);
 Expr mkSetDefCore(Expr defmap, Expr key, Expr v);
+Expr mkSetCore(Expr fm, Expr key, Expr v);
+Expr mkIteDefCore(Expr cond, Expr fm1, Expr fm2);
+Expr mkIteCore(Expr cond, Expr fm1, Expr fm2);
 Expr mkInlineDefs(Expr def, ExprMap defmap);
 void insertVarsDef(Expr defmap, ExprSet &vars);
 } // namespace fmap_transf

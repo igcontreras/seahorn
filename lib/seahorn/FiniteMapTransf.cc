@@ -30,16 +30,15 @@ void mkVarsMap(Expr mapConst, Expr map, const Range &keys, int nKs, Expr kTy,
     Expr k = *keys.begin();
     key = finite_map::mkVarKey(mapConst, k, kTy);
     *k_it++ = key;
-    v = finite_map::mkVarGet(mapConst, k, vTy);
+    v = finite_map::mkVarGet(mapConst, k, 0, vTy);
     *v_it++ = v;
     evars.insert(v);
-    evars.insert(key);
     *newArg_it++ = v;
   } else
     for (auto k : keys) {
       key = finite_map::mkVarKey(mapConst, k, kTy);
       *k_it++ = key;
-      v = finite_map::mkVarGet(mapConst, k, vTy);
+      v = finite_map::mkVarGet(mapConst, k, 0, vTy);
       *v_it++ = v;
       evars.insert(v);
       evars.insert(key);
@@ -47,7 +46,7 @@ void mkVarsMap(Expr mapConst, Expr map, const Range &keys, int nKs, Expr kTy,
       *newArg_it++ = v;
     }
   Expr defaultV = finite_map::mkDefault(map_values.back(), vTy);
-  evars.insert(defaultV);
+  //  evars.insert(defaultV);
 
   extra_unifs.push_back(
       mk<EQ>(map, finite_map::constFiniteMap(map_keys, defaultV, map_values)));
@@ -359,7 +358,7 @@ static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
        kty_it++, k_it++, v_it++) {
     *k_it = finite_map::mkVarKey(mapConst, *kty_it, kTy);
     fmei.m_vars.insert(*k_it);
-    *v_it = finite_map::mkVarGet(mapConst, *kty_it, vTy);
+    *v_it = finite_map::mkVarGet(mapConst, *kty_it, 0, vTy);
     fmei.m_vars.insert(*v_it);
   }
 
@@ -491,13 +490,13 @@ static Expr mkGetCore(Expr map, Expr key, FMapExprsInfo &fmei) {
     return finite_map::get(map, key);
   }
 
-  Expr defmap = map;
+  Expr fmd = map;
   if (bind::isFiniteMapConst(map))
-    defmap = fmei.m_fmapVarTransf[map];
+    fmd = fmei.m_fmapVarTransf[map];
 
   // get from defmap
-  if (finite_map::isInitializedFiniteMap(defmap))
-    return fmap_transf::mkGetDefCore(defmap, key);
+  if (finite_map::isInitializedFiniteMap(fmd))
+    return fmap_transf::mkGetDefCore(fmd, key);
 
   // get from lambda
   map = mkFMapPrimitiveArgCore(map, fmei);
@@ -511,14 +510,14 @@ static Expr mkSetCore(Expr map, Expr key, Expr v, FMapExprsInfo &fmei) {
   LOG("fmap_transf",
       errs() << "-- mkSetCore " << *map << " " << *key << " " << *v << "\n";);
 
-  Expr defmap = map;
+  Expr fmd = map;
   if (bind::isFiniteMapConst(map))
-    defmap = fmei.m_fmapVarTransf[map];
+    fmd = fmei.m_fmapVarTransf[map];
 
-  if (finite_map::isFmapVal(defmap)) {
-    defmap = fmap_transf::mkSetDefCore(defmap, key, v);
-    if (defmap != nullptr)
-      return defmap;
+  if (finite_map::isFmapVal(fmd)) {
+    fmd = fmap_transf::mkSetDefCore(fmd, key, v);
+    if (fmd != nullptr)
+      return fmd;
   }
   Expr procMap = mkFMapPrimitiveArgCore(map, fmei);
 
@@ -527,8 +526,7 @@ static Expr mkSetCore(Expr map, Expr key, Expr v, FMapExprsInfo &fmei) {
 
   Expr defk = isOpX<CONST_FINITE_MAP>(map) ? finite_map::fmapDefKeys(map)
                                            : fmei.m_fmapDefk[map];
-  Expr res =
-      (defk->arity() == 1) ? v : finite_map::mkSetVal(procMap, key, kTy, v);
+  Expr res = finite_map::mkSetVal(procMap, key, kTy, v);
 
   fmei.m_fmapDefk[res] = defk;
   fmei.m_type[res] = fmTy;
@@ -643,17 +641,16 @@ VisitAction FiniteMapBodyVisitor::operator()(Expr exp) {
   return VisitAction::doKids();
 }
 
-
 namespace fmap_transf {
 
 // -- obtains a value from a definition
-Expr mkGetDefCore(Expr defmap, Expr key) {
+Expr mkGetDefCore(Expr fmd, Expr key) {
 
   LOG("fmap_transf",
-      errs() << "-- mkGetDefCore " << *defmap << " " << *key << "\n";);
+      errs() << "-- mkGetDefCore " << *fmd << " " << *key << "\n";);
 
-  Expr ks = finite_map::fmapDefKeys(defmap);
-  Expr vs = finite_map::fmapDefValues(defmap);
+  Expr ks = finite_map::fmapDefKeys(fmd);
+  Expr vs = finite_map::fmapDefValues(fmd);
 
   if (ks->arity() == 1)
     return vs->left();
@@ -687,32 +684,55 @@ Expr mkGetDefCore(Expr defmap, Expr key) {
   return ite;
 }
 
-template <typename Range>
-static Expr replaceDefValues(Expr defmap, const Range &values) {
-  Expr ks = finite_map::fmapDefDefault(defmap);
-  auto keys = llvm::make_range(ks->begin(), ks->end());
+Expr mkGetCore(Expr map, Expr key) {
 
-  return finite_map::constFiniteMap(
-      keys, finite_map::fmapDefDefault(defmap)->left(), values);
+  LOG("fmap_transf",
+      errs() << " ---- mkSetCore " << *map << " " << *key << "\n");
+  Expr fmd;
+
+  if (isOpX<ITE>(map))
+    fmd = mkIteCore(map->left(), map->right(), map->last());
+  else
+    fmd = map;
+
+  if(finite_map::isFmapVal(fmd)){
+    LOG("fmap_transf", errs() << "   --->" << *mkGetDefCore(fmd, key) << "\n";);
+    return mkGetDefCore(fmd, key);
+  }
+  return finite_map::get(fmd,key);
+}
+
+Expr replaceDefKeys(Expr fmd, Expr keys) {
+  return finite_map::constFiniteMap(keys, finite_map::fmapDefDefault(fmd),
+                                    finite_map::fmapDefValues(fmd));
+}
+
+template <typename Range>
+Expr replaceDefValues(Expr fmd, const Range &values) {
+  return finite_map::constFiniteMap(finite_map::fmapDefKeys(fmd),
+                                    finite_map::fmapDefDefault(fmd),
+                                    finite_map::constFiniteMapValues(values));
 }
 
 // -- obtains a new definition after inserting a value, returns `nullptr` if the
 // -- value could be placed in several keys
-Expr mkSetDefCore(Expr defmap, Expr key, Expr v) {
+Expr mkSetDefCore(Expr fmd, Expr key, Expr v) {
 
-  LOG("fmap_transf", errs() << "-- mkSetDefCore " << *defmap << " " << *key
+  LOG("fmap_transf", errs() << "-- mkSetDefCore " << *fmd << " " << *key
                             << " " << *v << "\n";);
 
-  Expr vs = finite_map::fmapDefValues(defmap);
+  Expr vs = finite_map::fmapDefValues(fmd);
 
-  if (vs->arity() == 1) {
+  if (vs->arity() == 1) { // fmap of size 1
     ExprVector value = {v};
-    return replaceDefValues(defmap, value);
+    Expr res = replaceDefValues(fmd, value);
+    LOG("fmap_transf", errs() << "\t" << *res << "\n";);
+    return res;
   }
 
   std::vector<unsigned> matches;
   ExprVector conds;
-  Expr ks = finite_map::fmapDefKeys(defmap);
+  Expr ks = finite_map::fmapDefKeys(fmd);
   auto k_it = ks->begin();
   for (int i = 0; i < ks->arity(); i++, k_it++) { // find keys that match
     Expr cond = evalCondDsa(mk<EQ>(*k_it, key));
@@ -726,29 +746,92 @@ Expr mkSetDefCore(Expr defmap, Expr key, Expr v) {
   if (matches.empty()) // this should not happen, return def as it is?
     matches.push_back(ks->arity() - 1);
 
+  ExprVector nvalues(ks->arity());
+  auto ov_it = vs->begin();
+  int nextCh = matches[0];
   if (matches.size() == 1) { // replace only that one
-    ExprVector nvalues(ks->arity());
-    auto ov_it = vs->begin();
-    unsigned changed = matches[0];
     for (int i = 0; i < ks->arity(); i++, ov_it++)
-      if (i == changed)
+      if (i == nextCh)
         nvalues[i] = v;
       else
         nvalues[i] = *ov_it;
-
-    return replaceDefValues(defmap, nvalues);
+  } else {
+    auto m_it = ++matches.begin();
+    for (int i = 0; i < ks->arity(); i++, ov_it++) {
+      if (i == nextCh) {
+        nextCh = *m_it++;
+        nvalues[i] = mk<ITE>(conds[i], v, *ov_it);
+      } else
+        nvalues[i] = *ov_it;
+    }
   }
-  return nullptr;
+
+  Expr res = replaceDefValues(fmd, nvalues);
+  LOG("fmap_transf", errs() << "\t" << *res << "\n";);
+  return res;
+}
+
+Expr mkSetCore(Expr map, Expr key, Expr v) {
+
+  LOG("fmap_transf", errs() << " ---- mkSetCore " << *map << " " << *key << " " << *v << "\n");
+
+  Expr fmd;
+
+  if (isOpX<ITE>(map))
+    fmd = mkIteCore(map->left(), map->right(), map->last());
+  else
+    fmd = map;
+
+  if(finite_map::isFmapVal(fmd)) {
+    LOG("fmap_transf", errs() << "    ---> " << *mkSetDefCore(fmd, key, v) << "\n";);
+    return mkSetDefCore(fmd, key, v);
+  }
+
+  return finite_map::set(fmd,key,v);
+}
+
+Expr mkIteDefCore(Expr cond, Expr fmd1, Expr fmd2) {
+
+  assert(finite_map::isFmapVal(fmd1));
+  assert(finite_map::isFmapVal(fmd2));
+
+  ExprVector nvs(finite_map::fmapDefKeys(fmd1)->arity());
+
+  auto vs1_it = finite_map::fmapDefValues(fmd1)->begin();
+  auto vs2_it = finite_map::fmapDefValues(fmd2)->begin();
+
+  for (auto nvs_it = nvs.begin(); nvs_it != nvs.end(); nvs_it++)
+    *nvs_it = mk<ITE>(cond, *vs1_it++, *vs2_it++);
+
+  return replaceDefValues(fmd1, nvs);
+  // TODO: add side condition that the keys are the same?
+}
+
+Expr mkIteCore(Expr cond, Expr fm1, Expr fm2) {
+
+  LOG("fmap_transf",
+      errs() << " ---- mkIteCore " << *cond << " " << *fm1 << "\n " << *fm2 << "\n");
+
+  Expr fmd1 = isOpX<ITE>(fm1)
+                  ? mkIteCore(fm1->first(), fm1->right(), fm1->last())
+                  : fm1;
+  Expr fmd2 = isOpX<ITE>(fm2)
+                  ? mkIteCore(fm2->first(), fm2->right(), fm2->last())
+                  : fm2;
+  LOG("fmap_transf",
+      errs() << "    ---> " << *mkIteDefCore(cond, fmd1, fmd2) << "\n";);
+  return mkIteDefCore(cond, fmd1, fmd2);
 }
 
 class DefRewritter : public std::unary_function<Expr, Expr> {
-  ExprMap &m_defmap;
+  ExprMap &m_fmd;
 
 public:
-  DefRewritter(ExprMap &defmap) : m_defmap(defmap){};
+  DefRewritter(ExprMap &fmd) : m_fmd(fmd){};
   Expr operator()(Expr exp) {
     Expr fm = exp->left();
-    Expr def = bind::isFiniteMapConst(fm) ? m_defmap[fm] : exp->left();
+    Expr def = bind::isFiniteMapConst(fm) ? m_fmd[fm] : fm;
+    assert(finite_map::isFmapVal(def));
 
     return mkGetDefCore(def, exp->right());
   }
@@ -759,8 +842,8 @@ class DefVisitor : public std::unary_function<Expr, VisitAction> {
   std::shared_ptr<DefRewritter> m_rw;
 
 public:
-  DefVisitor(ExprMap &defmap) {
-    m_rw = std::make_shared<DefRewritter>(defmap);
+  DefVisitor(ExprMap &fmd) {
+    m_rw = std::make_shared<DefRewritter>(fmd);
   };
 
   VisitAction operator()(Expr exp) {
@@ -773,20 +856,19 @@ public:
   }
 };
 
-Expr mkInlineDefs(Expr def, ExprMap defmap) {
-  DefVisitor dv(defmap);
+Expr mkInlineDefs(Expr def, ExprMap defsmap) {
+  DefVisitor dv(defsmap);
   DagVisitCache cache;
   Expr newE = visit(dv, def, cache);
-  errs() << *def << "\n ---- replaced by:\n  " << *newE << "\n\n";
   return newE;
 }
 
-void insertVarsDef(Expr defmap, ExprSet &vars) {
-  Expr ks = finite_map::fmapDefKeys(defmap);
-  for (auto k_it = ks->begin() ; k_it != ks->end(); k_it++)
+void insertVarsDef(Expr fmd, ExprSet &vars) {
+  Expr ks = finite_map::fmapDefKeys(fmd);
+  for (auto k_it = ks->begin(); k_it != ks->end(); k_it++)
     vars.insert(*k_it);
 
-  Expr vs = finite_map::fmapDefValues(defmap);
+  Expr vs = finite_map::fmapDefValues(fmd);
   for (auto v_it = vs->begin(); v_it != vs->end(); v_it++)
     vars.insert(*v_it);
 }

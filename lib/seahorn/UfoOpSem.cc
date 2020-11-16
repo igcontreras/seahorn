@@ -140,6 +140,8 @@ struct OpSemBase {
   ExprVector m_inRegions;
   ExprVector m_outRegions;
 
+  ValueVector m_outValues;
+
   OpSemBase(SymStore &s, UfoOpSem &sem, ExprVector &side)
       : m_s(s), m_efac(m_s.getExprFactory()), m_sem(sem), m_side(side) {
     trueE = mk<TRUE>(m_efac);
@@ -163,13 +165,6 @@ struct OpSemBase {
   Expr havoc(const Value &v) {
     return m_sem.isTracked(v) ? m_s.havoc(symb(v)) : Expr(0);
   }
-
-  // void arrayWrite(const Value &v, Expr lhs, Expr rhs) {
-  //   if(ArrayUseWrite)
-  //     write(v,lhs);
-  //   else
-  //     side(lhs, rhs);
-  // }
 
   void write(const Value &v, Expr val) {
     if (val && m_sem.isTracked(v))
@@ -774,7 +769,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       // error flag out
       m_fparams[2] = (m_s.havoc(m_sem.errorFlag(BB)));
 
-      CallSiteInfo csi(CS, m_fparams);
+      CallSiteInfo csi(CS, m_fparams, m_outValues);
       m_sem.execCallSite(csi, m_side, m_s);
 
       // reseting parameter structures
@@ -785,6 +780,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
 
       m_inRegions.clear();
       m_outRegions.clear();
+      m_outValues.clear();
     } else if (F.getName().startswith("shadow.mem")) {
       if (!m_sem.isTracked(I))
         return;
@@ -810,19 +806,23 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
           m_outMem = m_s.havoc(symb(I));
           m_side.push_back(mk<EQ>(m_outMem, m_inMem));
         }
-      } else if (F.getName().equals("shadow.mem.arg.ref"))
+      } else if (F.getName().equals("shadow.mem.arg.ref")) {
         m_fparams.push_back(m_s.read(symb(*CS.getArgument(1))));
-      else if (F.getName().equals("shadow.mem.arg.mod")) {
+        m_outValues.push_back(CS.getArgument(1));
+      } else if (F.getName().equals("shadow.mem.arg.mod")) {
         auto in_par = m_s.read(symb(*CS.getArgument(1)));
+        m_outValues.push_back(CS.getArgument(1));
         m_fparams.push_back(in_par);
         m_inRegions.push_back(in_par);
         auto out_par = m_s.havoc(symb(I));
         m_fparams.push_back(out_par);
         m_outRegions.push_back(out_par);
-      } else if (F.getName().equals("shadow.mem.arg.new"))
+        m_outValues.push_back(&I);
+      } else if (F.getName().equals("shadow.mem.arg.new")) {
         m_fparams.push_back(m_s.havoc(symb(I)));
-      else if (!PF.getName().equals("main") &&
-               F.getName().equals("shadow.mem.in")) {
+        m_outValues.push_back(&I);
+      } else if (!PF.getName().equals("main") &&
+                 F.getName().equals("shadow.mem.in")) {
         m_s.read(symb(*CS.getArgument(1)));
       } else if (!PF.getName().equals("main") &&
                  F.getName().equals("shadow.mem.out")) {
@@ -844,22 +844,24 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         if (m_sem.isAbstracted(*f)) {
           assert(m_inRegions.size() && m_outRegions.size());
           for (unsigned i = 0; i < m_inRegions.size(); i++) {
-            addCondSide(mk<EQ>(m_outRegions[i], m_inRegions[i]));
+            if (finite_map::returnsFiniteMap(m_outRegions[i]))
+              write(*m_outValues[i], m_inRegions[i]);
+            else
+              addCondSide(mk<EQ>(m_outRegions[i], m_inRegions[i]));
           }
           WARN << "abstracted (unsoundly) a call to function " << F.getName()
                << " by a noop";
         } else {
           WARN << "skipping a call to " << F.getName()
-               << " (maybe a recursive call?)";
-          for (unsigned i = 0; i < m_inRegions.size(); i++) { // for fmaps!!
-            m_side.push_back(mk<EQ>(m_outRegions[i],
-                                    m_inRegions[i])); // TODO: update symstore
+               << " (maybe a recursive call?)"; // treated as noop for fmaps
+          for (unsigned i = 0; i < m_inRegions.size(); i++) {
+            write(*m_outValues[i], m_inRegions[i]);
           }
         }
-
         m_fparams.resize(3);
         m_inRegions.clear();
         m_outRegions.clear();
+        m_outValues.clear();
       }
 
       visitInstruction(*CS.getInstruction());
@@ -919,7 +921,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       if (returnsArray(m_inMem))
         rhs = op::array::select(m_inMem, op0);
       else if (finite_map::returnsFiniteMap(m_inMem)) {
-        rhs = op::finite_map::get(m_inMem, op0);
+        rhs = fmap_transf::mkGetCore(m_inMem, op0);
       }
 
       if (I.getType()->isIntegerTy(1))
@@ -1874,7 +1876,6 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     }
   }
 
-  auto r_it = fi.regions.begin();
   ExprVector arrayStores; // copies are not directly added to `side` because we
                           // want them to be active only if the function is
 
@@ -1893,9 +1894,15 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   for (auto &kv : m_cellReplaceOut) {
     Expr fmap = kv.second;
     auto &cellP = kv.first;
-    extraDefs[fmap] =
-        finite_map::constFiniteMap(getCellKeys(cellP, MemOpt::OUT), m_fmDefault,
-                                   getCellValues(cellP, MemOpt::OUT));
+    ExprVector &ks = getCellKeys(cellP, MemOpt::OUT);
+    Expr intTy = sort::intTy(m_efac);
+    ExprVector values(ks.size());
+    unsigned count = 0;
+    for (auto &v : values) {
+      v = finite_map::mkVarGet(fmap, mkTerm<expr::mpz_class>(count++, m_efac),
+                               0, intTy);
+    }
+    extraDefs[fmap] = finite_map::constFiniteMap(ks, m_fmDefault, values);
     errs() << "new def: " << *fmap << " = " << *extraDefs[fmap] << "\n";
   }
 
@@ -1903,6 +1910,8 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   for (auto &kv : extraDefs)
     recAddSortedDef(kv.first, kv.second, extraDefs, added, side, s);
 
+  auto r_it = fi.regions.begin();
+  auto v_it = csi.m_modValues.begin();
   for (int i = 3; i < csi.m_fparams.size(); i++) {
     Expr param = csi.m_fparams[i];
 
@@ -1911,16 +1920,41 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
     const Cell &regionCeCell = getCellValue(*r_it); // callee cell (SAS graph)
     auto pair = cellToPair(regionCeCell);
-    if (m_cellReplaceIn.count(pair) > 0) {
-      csi.m_fparams[i] = m_cellReplaceIn[pair];
-      if (m_cellReplaceOut.count(pair) > 0) {
+    if (m_cellReplaceIn.count(pair) > 0) { // input param
+      csi.m_fparams[i] = extraDefs[m_cellReplaceIn[pair]];
+      errs() << " [IN] replaced " << *param << " by: " << *csi.m_fparams[i]
+             << "\n";
+      if (m_cellReplaceOut.count(pair) > 0) { // output of input param
         i++;
         r_it++;
-        csi.m_fparams[i] = extraDefs[m_cellReplaceOut[pair]];
+        v_it++;
+        errs() << " [IN-OUT] replaced " << *csi.m_fparams[i] << " by: ";
+        Expr cellE = m_cellReplaceOut[pair];
+        param = csi.m_fparams[i];
+        csi.m_fparams[i] = extraDefs[cellE];
+        errs() << *csi.m_fparams[i] << "\n";
+        if (m_fmOut.count(param) > 0) {
+          // there may not be fmOut if nodes are split
+          Expr extra = fmap_transf::mkInlineDefs(m_fmOut[param], extraDefs);
+          if (finite_map::returnsFiniteMap(extra))
+            s.write(symb(**v_it), extra);
+          else
+            arrayStores.push_back(mk<EQ>(param, extra));
+        }
       }
-    } else if (m_cellReplaceOut.count(pair) > 0) {
-      csi.m_fparams[i] = extraDefs[m_cellReplaceOut[pair]];
-    } else if (finite_map::returnsFiniteMap(param) &&
+    } else if (m_cellReplaceOut.count(pair) > 0) { // output param
+      Expr cellE = m_cellReplaceOut[pair];
+      csi.m_fparams[i] = extraDefs[cellE];
+      if (m_fmOut.count(param) > 0) {
+        // there may not be fmOut if nodes are split
+        Expr extra = fmap_transf::mkInlineDefs(m_fmOut[param], extraDefs);
+        if (finite_map::returnsFiniteMap(extra))
+          s.write(symb(**v_it), extra);
+        else
+          arrayStores.push_back(mk<EQ>(param, extra));
+      }
+      errs() << " [OUT] replaced " << *csi.m_fparams[i] << " by: ";
+    } else if (finite_map::returnsFiniteMap(param) && // unused param
                isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)))
     // +1 because fi.sumpPred->arg(0) is the function name
     {
@@ -1930,36 +1964,35 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       // -- create a fresh array (not reachable in the callee bu)
       csi.m_fparams[i] =
           bind::mkConst(variant::variant(0, param), fi.sumPred->arg(i + 1));
+      errs() << " [CONST] replaced " << *param << " by: " << *csi.m_fparams[i]
+             << "\n";
       const Node *nOut = m_exprCell[param].first;
       if (!nOut->isRead() && nOut->isModified() &&
           bind::isFiniteMapConst(param)) {
-        // Expr keysTy =
-        // sort::finiteMapKeyTy(bind::rangeTy(bind::fname(param))); auto keysTyR
-        // = llvm::make_range(keysTy->begin(), keysTy->end());
-        // // if the map is only out requires init
-        // Expr keys =
-        //     finite_map::mkKeys(keysTyR, param, sort::intTy(m_efac), m_efac);
-        // auto keysR = llvm::make_range(keys->args_begin(), keys->args_end());
-        // side.push_back(finite_map::constrainKeys(param, keysR));
         csi.m_fparams[i] = extraDefs[m_cellReplaceOut[pair]];
-      } else if (i < csi.m_fparams.size()) {
+        errs() << " [ONLY OUT] replaced " << *param
+               << " by: " << *csi.m_fparams[i] << "\n";
+      } else if (i < csi.m_fparams.size()) { // output of unused param
         Expr nextParam = csi.m_fparams[i + 1];
         if (*r_it == *(r_it + 1)) {
           // -- add memOut = memIn (not accessed in this function)
           if (OpSemVisitor::returnsArray(nextParam))
             arrayStores.push_back(mk<EQ>(nextParam, param));
           else
-            side.push_back(
-                mk<EQ>(nextParam, param)); // TODO: overwrite SymStore
+            s.write(symb(**v_it), param);
           i++;
           r_it++;
+          v_it++;
           assert(isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)));
           csi.m_fparams[i] = bind::mkConst(variant::variant(0, nextParam),
                                            fi.sumPred->arg(i + 1));
+          errs() << " [NOT RELEVANT] replaced " << *nextParam
+                 << " by: " << *csi.m_fparams[i] << "\n";
         }
       }
-    }
+    } // TODO: increment v_it for arrays
     r_it++;
+    v_it++;
   }
 
   LOG(
@@ -1973,11 +2006,6 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   assert(csi.m_fparams.size() == bind::domainSz(fi.sumPred));
   assert(checkArgs(bind::fapp(fi.sumPred, csi.m_fparams)));
   side.push_back(bind::fapp(fi.sumPred, csi.m_fparams));
-
-  for (auto &kv : m_fmOut)
-    if (OpSemVisitor::returnsArray(kv.first))
-      arrayStores.push_back(
-          mk<EQ>(kv.first, fmap_transf::mkInlineDefs(kv.second, extraDefs)));
 
   if (arrayStores.size() > 0)
     side.push_back(boolop::limp(csi.m_fparams[0], boolop::land(arrayStores)));
@@ -2020,15 +2048,18 @@ void FMapUfoOpSem::recAddSortedDef(const Expr map, const Expr def,
   defs[def] = inlinedDef;
 }
 
-Expr FMapUfoOpSem::fmVariant(Expr e, const ExprVector &keys) {
+Expr FMapUfoOpSem::fmVariant(Expr e, const Cell &c, const ExprVector &keys) {
 
   assert(keys.size() > 0);
-  Expr cTy = bind::rangeTy(bind::fname(e));
-  Expr vTy =
-      bind::isArrayConst(e) ? sort::arrayValTy(cTy) : sort::finiteMapValTy(cTy);
 
-  return bind::mkConst(variant::variant(m_copy_count++, e),
-                       sort::finiteMapTy(vTy, keys));
+  auto cid_a = m_shadowDsa->getCellId(c);
+  assert(cid_a.hasValue());
+  unsigned cid = cid_a.getValue();
+
+  Expr name = finite_map::mkCellTag(cid, m_preproc->getOffset(c), m_efac);
+
+  return bind::mkConst(variant::variant(m_copy_count++, name),
+                       sort::finiteMapTy(sort::intTy(m_efac), keys));
 }
 
 void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
@@ -2104,7 +2135,7 @@ Expr FMapUfoOpSem::memObtainValue(Expr mem, Expr offset) {
   if (OpSemVisitor::returnsArray(mem))
     return op::array::select(mem, offset);
   else if (finite_map::returnsFiniteMap(mem))
-    return op::finite_map::get(mem, offset);
+    return fmap_transf::mkGetCore(mem, offset);
   else // mem represented as scalar
     return mem;
 }
@@ -2156,14 +2187,22 @@ void FMapUfoOpSem::storeVal(const Cell &cCr, const Cell &cSAS, Expr readFrom,
   //    previous term for storing
   Expr storeAt = (m_fmOut.count(out) == 0) ? origMem : m_fmOut[out];
 
-  // LOG("inter_mem_fmaps", errs() << "Storing at: " << *storeAt
-  //                               << "\n\t from: " << *readFrom << "\n";);
-  // Expr value = memObtainValue(readFrom, dir);
-  Expr value = finite_map::mkVarGet(readFrom, dir, sort::intTy(m_efac));
+  LOG("inter_mem_fmaps", errs() << "Storing at: " << *storeAt
+                                << "\n\t from: " << *readFrom << "\n";);
+
+  Expr value = memObtainValue(readFrom, dir);
+  // Expr value = finite_map::mkVarGet(readFrom, dir, sort::intTy(m_efac));
   m_fmOut[out] = memSetValue(storeAt, dir, value); // additional stores
 
+  LOG("inter_mem_fmaps",
+      errs() << "out: " << *out << " array: " << *m_fmOut[out] << "\n";
+      errs() << " fmap var: "
+             << *finite_map::mkVarGet(readFrom, dir, 0, sort::intTy(m_efac))
+             << "\n");
+
   getCellKeys(cSAS, MemOpt::OUT).push_back(dir);
-  getCellValues(cSAS, MemOpt::OUT).push_back(value);
+  getCellValues(cSAS, MemOpt::OUT)
+      .push_back(finite_map::mkVarGet(readFrom, dir, 0, sort::intTy(m_efac)));
 }
 
 Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCr, const Cell &cCe,
@@ -2174,7 +2213,7 @@ Expr FMapUfoOpSem::getFreshMapSymbol(const Cell &cCr, const Cell &cCe,
   auto &cellReplace = (ao == MemOpt::IN) ? m_cellReplaceIn : m_cellReplaceOut;
   auto pCCe = cellToPair(cCe);
   if (cellReplace.count(pCCe) == 0) { // not copied yet
-    Expr newE = fmVariant(origE, m_preproc->getKeysCell(cCe, &F));
+    Expr newE = fmVariant(origE, cCe, m_preproc->getKeysCell(cCe, &F));
     cellReplace[pCCe] = newE;
     return newE;
   } else

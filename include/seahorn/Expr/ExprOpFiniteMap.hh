@@ -191,9 +191,11 @@ inline Expr constFiniteMap(const Range1 &keys, Expr def, const Range2 &values) {
                               constFiniteMapValues(values));
 }
 
-inline bool isFmapVal(Expr fmap) {
-  return isOpX<CONST_FINITE_MAP>(fmap);
+inline Expr constFiniteMap(Expr keys, Expr def, Expr values) {
+  return mk<CONST_FINITE_MAP>(keys, def, values);
 }
+
+inline bool isFmapVal(Expr fmap) { return isOpX<CONST_FINITE_MAP>(fmap); }
 inline Expr fmapDefKeys(Expr fmap) { return fmap->left(); }
 
 inline Expr fmapDefDefault(Expr fmap) {
@@ -214,24 +216,15 @@ inline bool isInitializedFiniteMap(Expr m) {
 }
 
 inline Expr get(Expr map, Expr idx) {
-  Expr get = nullptr;
-  if(isOpX<CONST_FINITE_MAP>(map)) // get over fmap val
-    get = seahorn::fmap_transf::mkGetDefCore(map, idx);
-
-  if(get)
-    return get;
-
   return mk<GET>(map, idx);
 }
 
 // inline Expr set(Expr map, Expr idx, Expr v) { return mk<SET>(map, idx, v); }
 inline Expr set(Expr map, Expr idx, Expr v) {
 
-  Expr set = nullptr;
-  if(isOpX<CONST_FINITE_MAP>(map)) // set over fmap val
-    set = seahorn::fmap_transf::mkSetDefCore(map, idx, v);
+  Expr set = seahorn::fmap_transf::mkSetCore(map, idx, v);
 
-  if(set)
+  if (set)
     return set;
   else
     return mk<SET>(map, idx, v);
@@ -479,8 +472,9 @@ inline Expr mkVarKey(Expr mapConst, Expr k, Expr kTy) {
 
 // -- creates a constant with the name get(map,k)
 // also used in FinteMapBodyVisitor
-inline Expr mkVarGet(Expr mapConst, Expr k, Expr vTy) {
-  return bind::mkConst(variant::variant(0, finite_map::get(mapConst, k)), vTy);
+inline Expr mkVarGet(Expr mapConst, Expr k, unsigned idx, Expr vTy) {
+  return bind::mkConst(variant::variant(idx, finite_map::get(mapConst, k)),
+                       vTy);
 }
 
 inline Expr mkDefault(Expr base, Expr vTy) {
@@ -488,7 +482,7 @@ inline Expr mkDefault(Expr base, Expr vTy) {
                        vTy);
 }
 
-inline Expr mkVal(Expr mapConst) {
+inline Expr mkVal(Expr mapConst, unsigned idx) {
   Expr fmapTy = bind::rangeTy(bind::name(mapConst));
 
   Expr vTy = sort::finiteMapValTy(fmapTy);
@@ -500,9 +494,9 @@ inline Expr mkVal(Expr mapConst) {
 
   auto k_it = keys.begin();
   auto v_it = values.begin();
-  for (auto kTy_it = ksTy->args_begin() ; kTy_it != ksTy->args_end() ; kTy_it++) {
+  for (auto kTy_it = ksTy->args_begin(); kTy_it != ksTy->args_end(); kTy_it++) {
     *k_it++ = mkVarKey(mapConst, *kTy_it, kTy);
-    *v_it++ = mkVarGet(mapConst, *kTy_it, vTy);
+    *v_it++ = mkVarGet(mapConst, *kTy_it, idx, vTy);
   }
 
   return constFiniteMap(keys, mkDefault(mapConst, vTy), values);

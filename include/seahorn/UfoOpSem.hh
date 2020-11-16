@@ -9,7 +9,6 @@
 
 #include "seadsa/ShadowMem.hh"
 #include "seahorn/InterMemPreProc.hh"
-// #include "seahorn/FMapOpSemTransf.hh"
 
 namespace llvm {
 class GetElementPtrInst;
@@ -17,13 +16,16 @@ class GetElementPtrInst;
 
 namespace seahorn {
 
+using ValueVector = std::vector<llvm::Value *>;
+
 struct CallSiteInfo {
 
-  CallSiteInfo(CallSite &cs, ExprVector &fparams)
-      : m_cs(cs), m_fparams(fparams) {}
+  CallSiteInfo(CallSite &cs, ExprVector &fparams, ValueVector &modValues)
+    : m_cs(cs), m_fparams(fparams), m_modValues(modValues) {}
 
   CallSite &m_cs;
   ExprVector &m_fparams;
+  ValueVector &m_modValues;
 };
 
 /**
@@ -267,7 +269,7 @@ private:
                    const NodeSet &safeNodesCe, const NodeSet &safeNodesCr,
                    SimulationMapper &simMap, const Function &F);
 
-  Expr fmVariant(Expr e, const ExprVector &keys);
+  Expr fmVariant(Expr e, const Cell&c, const ExprVector &keys);
   void addKeyValCell(const Cell &cCr, const Cell &cCe, Expr basePtr,
                      unsigned offset);
   void storeVal(const Cell &cCr, const Cell &cSAS, Expr readFrom, Expr basePtr,
