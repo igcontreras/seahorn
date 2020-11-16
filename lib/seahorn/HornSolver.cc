@@ -304,12 +304,13 @@ static Expr processFmaps(Expr bbfapp, HornDbModel &model) {
   else
     invar = model.getDef(bbfapp);
 
-  if(!isOpX<TRUE>(invar)){
-    outs() << *bbfapp << " where:\n";
-    auto arg_it = bbfappAndT->args_begin();
-    for (; arg_it != bbfappAndT->args_end() -1 ; arg_it++)
-      outs()  << "\t" << **arg_it << "\n";
-  }
+  // do not print full fmaps
+  // if(!isOpX<TRUE>(invar)){
+  //   outs() << *bbfapp << " where:\n";
+  //   auto arg_it = bbfappAndT->args_begin();
+  //   for (; arg_it != bbfappAndT->args_end() -1 ; arg_it++)
+  //     outs()  << "\t" << **arg_it << "\n";
+  // }
   return invar;
 }
 
