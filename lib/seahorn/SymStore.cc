@@ -71,12 +71,21 @@ Expr SymStore::havoc(Expr key) {
         kids.push_back(this->havoc(fld));
       }
       val = strct::mk(kids);
-    }  else if (bind::isFiniteMapConst(key)) {
+    } else if (bind::isFiniteMapConst(key)) {
       // special case: key of sort finite map -> create an fmap value
       val = at(key);
-      if(!val)
-        val = finite_map::mkVal(key);
-    } else {
+      if (!val)
+        val = finite_map::mkVal(key, 0);
+    } //  else if(finite_map::isConstFiniteMap(key)){
+    //     Expr d = finite_map::fmapDefDefault(val);
+    //     Expr fname = bind::fname(bind::fname(val));
+    //     fname = variant::mainVariant(fname);
+    //     val = at(key);
+    //     int idx = variant::variantNum(fname) + 1;
+    //     val = finite_map::mkVal(key, idx);
+    //   }
+    // }
+    else {
       // -- the usual case, either create a new value or update an old one
       val = at(key);
       Expr fdecl = val ? bind::fname(val) : bind::fname(key);
