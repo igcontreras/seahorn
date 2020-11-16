@@ -2,26 +2,38 @@
 // CHECK: ^unsat$
 
 #include <stdlib.h>
+#include <stdio.h>
 
+extern int nd_int(void);
 extern void __VERIFIER_error(void);
 extern void __VERIFIER_assume(int);
 #define assume __VERIFIER_assume
 #define sassert(X) (void)((X) || (__VERIFIER_error(), 0))
 
-int *create_int(int v) {
-  int *p = (int *)malloc(sizeof(int));
+int * p;
+
+void modify_int(int *p, int *q, int v) {
   *p = v;
-  return p;
+  *q = v;
 }
 
-void modify_int(int *p, int v) { *p = v; }
+int main(int argc, char ** argv) {
+  p = (int *)malloc(2 * sizeof(int));
+  int *q = (int *)malloc(2 * sizeof(int));
+  int count = 0;
 
-int main() {
-  int *p = create_int(100);
+  assume(argc < 5);
+  for(int i = 0; i < argc ; i++){
+    if(nd_int())
+      argv[i][0] = '-';
 
-  modify_int(p, 42);
+    if(argv[i][0] == '-')
+      count++;
+  }
 
-  sassert(*p == 42);
+  modify_int(p, q, 42);
+
+  sassert(*p == 42 && *q == 42 && count >= 0);
 
   return 0;
 }

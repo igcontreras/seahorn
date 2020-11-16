@@ -1,6 +1,8 @@
 // RUN: sea pf -O0 --dsa=sea-cs --horn-vcgen-use-ite --horn-array-global-constraints --horn-use-write=false  --horn-global-constraints --horn-shadow-mem-optimize=false --horn-inter-proc-mem-fmaps --horn-fmap-max-keys=5 %s
 // CHECK: ^unsat$
 
+// TODO: this is crashing right now
+
 #include <stdlib.h>
 
 extern void __VERIFIER_error(void);
@@ -8,25 +10,32 @@ extern void __VERIFIER_assume(int);
 #define assume __VERIFIER_assume
 #define sassert(X) (void)((X) || (__VERIFIER_error(), 0))
 
-typedef struct LElem {
-  int data;
-  struct LElem *next;
-} LElem;
+typedef struct Struct {
+  int x;
+  int y;
+} Point;
 
-void add_to_end(LElem *e) {
-  LElem *newe = (LElem * )malloc(sizeof(LElem));
 
-  e->next = newe;
-  newe->next = 0;
+void modify_int(int *x, int *y, int v) {
+  *x = v;
+  *y = v;
+}
 
+void modify_point(Point *p, int v) {
+  modify_int(&p->x, &p->y, v);
 }
 
 int main() {
-  LElem e1;
 
-  add_to_end(&e1);
+  Point * p =(Point *)malloc(sizeof(Point));
 
-  sassert(e1.next->next == 0);
+  // p -> *p // defk(p)
+  // q -> *q // defk(q)
+
+  // x = p,  // x -> *p // defk(x)
+  modify_point(p, 42);
+
+  sassert(p->x == 42);
 
   return 0;
 }

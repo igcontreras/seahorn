@@ -1,50 +1,60 @@
 // RUN: sea pf -O0 --dsa=sea-cs --horn-vcgen-use-ite --horn-array-global-constraints --horn-use-write=false  --horn-global-constraints --horn-shadow-mem-optimize=false --horn-inter-proc-mem-fmaps --horn-fmap-max-keys=5 %s
 // CHECK: ^unsat$
 
-// Interesting case 2
-// nothing can be copied when calling foo (p1 aliases with p2)
-// with no aliasing, p1 could be copied
 
-// do not check satisfiability of this test, it is just meant to test copying
-// the memory 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 
 extern void sea_dsa_alias(const void *p, ...);
-
+extern int nd_int();
 extern void __VERIFIER_error(void);
 extern void __VERIFIER_assume(int);
 #define assume __VERIFIER_assume
 #define sassert(X) (void)((X) || (__VERIFIER_error(), 0))
 
-typedef struct Struct {
-  struct Struct * x;
-  struct Struct * y;
-} Struct;
-extern Struct *nd_struct();
+#define MAX_LIST 30
 
-void foo(Struct *p1, Struct *p2) {
+typedef struct LElem {
+  int data;
+  struct LElem *next;
+} LElem;
 
-  p1->x = NULL;
-  p1->y = NULL;
+typedef struct List {
+  int cap;
+  int sz;
+  LElem *e;
+} List;
 
-  p2->x = NULL;
-  sea_dsa_alias(p2, p2->y);
+void init_list(List *l) {
+  l->cap = MAX_LIST;
+  l->sz = 0;
+  l->e = NULL;
+}
+
+// bounded memory written and read
+int push_elem(List *l, int data) {
+
+  if (l->sz < l->cap) {
+    LElem *e = (LElem *)malloc(sizeof(LElem));
+    e->data = data;
+    e->next = l->e;
+    l->e = e;
+    l->sz++;
+    return 0;
+  }
+  return -1;
 }
 
 int main() {
+  List l1;
 
-  Struct *p1, *p2;
-  p1 = nd_struct();
-  p2 = nd_struct();
+  init_list(&l1);
 
-  sea_dsa_alias(p1, p2);
+  push_elem(&l1, 42);
 
-  foo(p1, p2);
-
-  sassert(p1->x == NULL);
+  sassert(l1.sz == 1);
 
   return 0;
 }

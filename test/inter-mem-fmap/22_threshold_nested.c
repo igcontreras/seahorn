@@ -36,8 +36,7 @@ void init_list2(List * l) {
 void init_list3(List * l) {
   l->cap=MAX_LIST;
   l->sz=0;
-  l->e=(LElem *)malloc(sizeof(LElem));
-  l->e->data=3;
+  l->e=NULL;
 }
 
 
@@ -47,9 +46,9 @@ void init_list3(List * l) {
 int main() {
   List l1;
 
-  //  init_list1(&l1);
+  init_list1(&l1);
   init_list2(&l1);
-  // init_list3(&l1);
+  init_list3(&l1);
 
   sassert(l1.sz <= l1.cap);
 

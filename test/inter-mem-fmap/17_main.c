@@ -2,31 +2,31 @@
 // CHECK: ^unsat$
 
 #include <stdlib.h>
+#include <stdio.h>
 
+extern int nd_int(void);
 extern void __VERIFIER_error(void);
 extern void __VERIFIER_assume(int);
 #define assume __VERIFIER_assume
 #define sassert(X) (void)((X) || (__VERIFIER_error(), 0))
 
-typedef struct LElem {
-  int data;
-  struct LElem *next;
-} LElem;
+int * p;
 
-void add_to_end(LElem *e) {
-  LElem *newe = (LElem * )malloc(sizeof(LElem));
-
-  e->next = newe;
-  newe->next = 0;
-
+void modify_int(int *p, int *q, int v) {
+  *p = v;
+  *q = v;
 }
 
-int main() {
-  LElem e1;
+int main(int argc, char ** argv) {
+  p = (int *)malloc(2 * sizeof(int));
+  int *q = (int *)malloc(2 * sizeof(int));
+  int *r = p;
+  r[1] = 42;
+  int count = 0;
 
-  add_to_end(&e1);
+  modify_int(p, q, 42);
 
-  sassert(e1.next->next == 0);
+  sassert(*p == 42 && *q == 42 && p[1] == 42);
 
   return 0;
 }

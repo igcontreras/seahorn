@@ -8,25 +8,24 @@ extern void __VERIFIER_assume(int);
 #define assume __VERIFIER_assume
 #define sassert(X) (void)((X) || (__VERIFIER_error(), 0))
 
-typedef struct LElem {
-  int data;
-  struct LElem *next;
-} LElem;
-
-void add_to_end(LElem *e) {
-  LElem *newe = (LElem * )malloc(sizeof(LElem));
-
-  e->next = newe;
-  newe->next = 0;
-
+// (int, int, int, fmap(defk(x)), fmap(defk(x)), fmap(defk(y)), fmap(defk(y)))
+void modify_int(int *x, int *y, int v) {
+  *x = v;
+  *y = v;
 }
 
 int main() {
-  LElem e1;
 
-  add_to_end(&e1);
+  int *p = (int *)malloc(2*sizeof(int));
+  int *q = (int *)malloc(2 * sizeof(int));
 
-  sassert(e1.next->next == 0);
+  // p -> *p // defk(p)
+  // q -> *q // defk(q)
+
+  // x = p,  // x -> *p // defk(x)
+  modify_int(p, 0, 42);
+
+  sassert(*p == 42);
 
   return 0;
 }

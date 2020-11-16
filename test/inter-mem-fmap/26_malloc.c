@@ -3,41 +3,41 @@
 
 #include <stdlib.h>
 
-extern void sea_dsa_alias(const void *p, ...);
-extern int nd_int();
+extern unsigned nd();
 extern void __VERIFIER_error (void);
 extern void __VERIFIER_assume (int);
 #define assume __VERIFIER_assume
 #define sassert(X) (void)((X) || (__VERIFIER_error (), 0))
 
-#define MAX_LIST 30
+#define INT_MAX 30
 
-typedef struct LElem {
+typedef struct baz{
   int data;
-  struct LElem * next;
-} LElem;
+} baz;
 
-typedef struct List {
-  int cap;
-  int sz;
-  LElem * e;
-} List;
-
-void init_list(List * l) {
-  l->cap=MAX_LIST;
-  l->sz=0;
-  l->e=NULL;
+baz *foo(baz *n) {
+  baz  *p;
+  if (n->data == INT_MAX) {
+    p = (baz *)malloc(sizeof(baz));
+  } else {
+    p = n;
+  }
+  p->data = 5;
+  return p;
 }
-
-/*
-  converges if l1 and l2 do not alias.
- */
+void bar(baz* q, baz *r);
 int main() {
-  List l1;
+  baz *q, *r;
+  baz *objs[10];
+  for (int i = 0; i < 10; i++) {
+    objs[i] = (baz *)malloc(sizeof(baz));
+  }
+  unsigned j = nd();
+  assume(0 <= j && j < 10);
+  q = objs[j];
+  r = foo(q);
+  bar(q, r);
 
-  init_list(&l1);
-
-  sassert(l1.sz <= l1.cap);
-
+  sassert(r->data == 5);
   return 0;
 }

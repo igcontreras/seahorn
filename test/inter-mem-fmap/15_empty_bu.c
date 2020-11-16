@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 
+extern void sea_dsa_alias(const void *p, ...);
 extern void __VERIFIER_error(void);
 extern void __VERIFIER_assume(int);
 #define assume __VERIFIER_assume
@@ -13,18 +14,30 @@ typedef struct LElem {
   struct LElem *next;
 } LElem;
 
-void add_to_end(LElem *e) {
-  LElem *newe = (LElem * )malloc(sizeof(LElem));
+void add_to_end(LElem *e, int v) {
+  LElem *newe = (LElem *)malloc(sizeof(LElem));
 
   e->next = newe;
-  newe->next = 0;
-
+  e->data = v;
+  newe->next = NULL;
 }
 
-int main() {
-  LElem e1;
+void do_nothing2(LElem *e) {}
 
-  add_to_end(&e1);
+void do_nothing(LElem * e) { do_nothing2(e); }
+
+int main() {
+  LElem e1, e2;
+  sea_dsa_alias(&e1,&e2);
+
+  add_to_end(&e1, 0);
+  /* add_to_end(&e2, 37); */
+
+  assume(&e1 + sizeof(struct LElem) < &e2);
+  /* assume(&e1.next + sizeof(struct LElem) < &e2.next); */
+
+  //  sea_dsa_alias(&e1.next,&e2.next);
+  do_nothing(&e2);
 
   sassert(e1.next->next == 0);
 
