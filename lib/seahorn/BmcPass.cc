@@ -213,13 +213,13 @@ public:
 
         // XXX: uses OperationalSemantics but trace generation still depends on
         // LegacyOperationalSemantics
-        solver::SolverKind solver_kind;
+        SolverKind solver_kind;
         switch (BmcSolver) {
         case BmcSolverKind::SMT_Z3:
-          solver_kind = solver::SolverKind::Z3;
+          solver_kind = SolverKind::Z3;
           break;
         case BmcSolverKind::SMT_YICES2:
-          solver_kind = solver::SolverKind::YICES2;
+          solver_kind = SolverKind::YICES2;
           break;
         default:
           LOG("bmc", errs()
@@ -348,30 +348,28 @@ public:
           errs() << "CORE END\n";
         });
 
-    LOG(
-        "cex", if (res) {
-          errs() << "Analyzed Function:\n" << F << "\n";
-          errs() << "Trace \n";
-          BmcTrace trace(bmc.getTrace());
-          trace.print(errs());
-        });
-
-    if (res) {
-      StringRef CexFileRef(HornCexFile);
-      if (CexFileRef != "") {
-        if (CexFileRef.endswith(".ll") || CexFileRef.endswith(".bc")) {
-          auto &tli = getAnalysis<TargetLibraryInfoWrapperPass>();
-          auto const &dl = F.getParent()->getDataLayout();
-          BmcTrace trace(bmc.getTrace());
-          BmcTraceWrapper trace_wrapper(trace);
-          dumpLLVMCex(trace_wrapper, CexFileRef, dl, tli.getTLI(F),
-                      F.getContext());
-        } else {
-          WARN << "The Bmc engine only generates harnesses in bitcode "
-                  "format";
+    LOG("cex", {
+      if (res) {
+        errs() << "Analyzed Function:\n" << F << "\n";
+        errs() << "Trace \n";
+        ZBmcTraceTy trace(bmc.getTrace());
+        trace.print(errs());
+        // dump to harness file
+        StringRef CexFileRef(HornCexFile);
+        if (CexFileRef != "") {
+          if (CexFileRef.endswith(".ll") || CexFileRef.endswith(".bc")) {
+            auto &tli = getAnalysis<TargetLibraryInfoWrapperPass>();
+            auto const &dl = F.getParent()->getDataLayout();
+            BmcTraceWrapper<ZBmcTraceTy> trace_wrapper(trace);
+            dumpLLVMCex(trace_wrapper, CexFileRef, dl, tli.getTLI(F),
+                        F.getContext());
+          } else {
+            WARN << "The Bmc engine only generates harnesses in bitcode "
+                    "format";
+          }
         }
       }
-    }
+    });
   }
 
   void runSolverBmcEngine(SolverBmcEngine &bmc, Function &F) {
@@ -397,27 +395,40 @@ public:
 
     Stats::stop("BMC");
 
-    if (res == solver::SolverResult::SAT)
+    if (res == SolverResult::SAT)
       outs() << "sat";
-    else if (res == solver::SolverResult::UNSAT)
+    else if (res == SolverResult::UNSAT)
       outs() << "unsat";
     else
       outs() << "unknown";
     outs() << "\n";
 
-    if (res == solver::SolverResult::SAT)
+    if (res == SolverResult::SAT)
       Stats::sset("Result", "FALSE");
-    else if (res == solver::SolverResult::UNSAT)
+    else if (res == SolverResult::UNSAT)
       Stats::sset("Result", "TRUE");
 
-    LOG(
-        "cex", if (res == solver::SolverResult::SAT) {
-          errs() << "Analyzed Function:\n" << F << "\n";
-          errs() << "Trace \n";
-          SolverBmcTrace trace(bmc.getTrace());
-          trace.print(errs());
-        });
-    // todo: support --cex mode (generate harness)
+    LOG("cex", {
+      if (res == SolverResult::SAT) {
+        errs() << "Analyzed Function:\n" << F << "\n";
+        errs() << "Trace \n";
+        SolverBmcTraceTy trace(bmc.getTrace());
+        trace.print(errs());
+        StringRef CexFileRef(HornCexFile);
+        if (CexFileRef != "") {
+          if (CexFileRef.endswith(".ll") || CexFileRef.endswith(".bc")) {
+            auto &tli = getAnalysis<TargetLibraryInfoWrapperPass>();
+            auto const &dl = F.getParent()->getDataLayout();
+            BmcTraceWrapper<SolverBmcTraceTy> trace_wrapper(trace);
+            dumpLLVMCex(trace_wrapper, CexFileRef, dl, tli.getTLI(F),
+                        F.getContext());
+          } else {
+            WARN << "The Bmc engine only generates harnesses in bitcode "
+                    "format";
+          }
+        }
+      }
+    });
   }
 
   void runPathBmcEngine(PathBmcEngine &bmc, Function &F) {
@@ -432,21 +443,21 @@ public:
     auto res = bmc.solve();
     Stats::stop("BMC");
 
-    if (res == solver::SolverResult::SAT)
+    if (res == SolverResult::SAT)
       outs() << "sat";
-    else if (res == solver::SolverResult::UNSAT)
+    else if (res == SolverResult::UNSAT)
       outs() << "unsat";
     else
       outs() << "unknown";
     outs() << "\n";
 
-    if (res == solver::SolverResult::SAT)
+    if (res == SolverResult::SAT)
       Stats::sset("Result", "FALSE");
-    else if (res == solver::SolverResult::UNSAT)
+    else if (res == SolverResult::UNSAT)
       Stats::sset("Result", "TRUE");
 
     LOG(
-        "cex", if (res == solver::SolverResult::SAT) {
+        "cex", if (res == SolverResult::SAT) {
           errs() << "Analyzed Function:\n" << F << "\n";
           PathBmcTrace trace(bmc.getTrace());
           errs() << "Trace \n";

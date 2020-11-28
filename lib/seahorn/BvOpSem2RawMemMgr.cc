@@ -678,6 +678,11 @@ Expr RawMemManager::isDereferenceable(PtrTy p, Expr byteSz) {
   return Expr();
 }
 
+Expr RawMemManager::isModified(PtrTy p, MemValTy mem) {
+  LOG("opsem", ERR << "()isModified() not implemented");
+  return Expr();
+}
+
 /// \brief Executes ptrtoint conversion
 Expr RawMemManager::ptrtoint(PtrTy ptr, const Type &ptrTy,
                              const Type &intTy) const {
@@ -735,5 +740,11 @@ Expr RawMemManager::zeroedMemory() const {
 }
 OpSemAllocator &RawMemManager::getMAllocator() const { return *m_allocator; }
 bool RawMemManager::ignoreAlignment() const { return m_ignoreAlignment; }
+
+RawMemManager::MemValTy
+RawMemManager::resetModified(PtrTy p, RawMemManager::MemValTy mem) {
+  LOG("opsem", WARN << "resetModified() not implemented!\n");
+  return mem;
+}
 } // namespace details
 } // namespace seahorn

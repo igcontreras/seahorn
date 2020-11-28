@@ -1,12 +1,19 @@
 #ifndef __BMC__HH_
 #define __BMC__HH_
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Function.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "boost/container/flat_set.hpp"
 #include "boost/logic/tribool.hpp"
 
+#include "seahorn/CallUtils.hh"
 #include "seahorn/Expr/Expr.hh"
+#include "seahorn/Expr/HexDump.hh"
 #include "seahorn/Expr/Smt/EZ3.hh"
 
 #include "seahorn/Analysis/CutPointGraph.hh"
@@ -20,14 +27,22 @@ namespace bmc_impl {
 bool isCallToVoidFn(const llvm::Instruction &I);
 /// computes an implicant of f (interpreted as a conjunction) that
 /// contains the given model
-void get_model_implicant(const ExprVector &f, ZModel<EZ3> &model,
-                         ExprVector &out, ExprMap &active_bool_map);
+template <typename model_ref>
+void get_model_implicant(const ExprVector &f, model_ref model, ExprVector &out,
+                         ExprMap &active_bool_map);
 // out is a minimal unsat core f based on assumptions
 void unsat_core(ZSolver<EZ3> &solver, const ExprVector &f,
                 bool simplify, ExprVector &out);
+
+template <typename Out>
+void dump_evaluated_inst(const Instruction &inst, Expr v, Out &out,
+                         bool shadow_mem);
 } // namespace bmc_impl
 
-class BmcTrace;
+template <class Engine, typename Model> class BmcTrace;
+class BmcEngine;
+using ZModelRef = ZModel<EZ3>;
+using ZBmcTraceTy = BmcTrace<BmcEngine, ZModelRef>;
 class BmcEngine {
 protected:
   /// symbolic operational semantics
@@ -79,7 +94,7 @@ public:
   }
 
   /// Returns the BMC trace (if available)
-  virtual BmcTrace getTrace();
+  ZBmcTraceTy getTrace();
 
   Expr getSymbReg(const llvm::Value &v) {
     Expr reg;
@@ -117,10 +132,9 @@ public:
   std::vector<SymStore> &getStates() { return m_states; }
 };
 
-class BmcTrace {
-  BmcEngine &m_bmc;
-
-  ZModel<EZ3> m_model;
+template <class Engine, class Model> class BmcTrace {
+  Engine &m_bmc;
+  Model m_model;
 
   // for trace specific implicant
   ExprVector m_trace;
@@ -130,7 +144,7 @@ class BmcTrace {
   SmallVector<const BasicBlock *, 8> m_bbs;
 
   /// a map from an index of a basic block on a trace to the index
-  /// of the corresponding cutpoint in BmcEngine
+  /// of the corresponding cutpoint in Engine
   SmallVector<unsigned, 8> m_cpId;
 
   /// cutpoint id corresponding to the given location
@@ -141,15 +155,19 @@ class BmcTrace {
     return loc == 0 || cpid(loc - 1) != cpid(loc);
   }
 
+  void constructTrace();
+
 public:
-  BmcTrace(BmcEngine &bmc, ZModel<EZ3> &model);
+  BmcTrace(Engine &bmc, Model model) : m_bmc(bmc), m_model(model) {
+    constructTrace();
+  }
 
   BmcTrace(const BmcTrace &other)
       : m_bmc(other.m_bmc), m_model(other.m_model), m_bbs(other.m_bbs),
         m_cpId(other.m_cpId) {}
 
   /// underlying BMC engine
-  BmcEngine &engine() { return m_bmc; }
+  Engine &engine() { return m_bmc; }
   /// The number of basic blocks in the trace
   unsigned size() const { return m_bbs.size(); }
 
@@ -157,9 +175,12 @@ public:
   const llvm::BasicBlock *bb(unsigned loc) const { return m_bbs[loc]; }
 
   /// The value of the instruction at the given location
-  Expr symb(unsigned loc, const llvm::Value &inst);
+  Expr symb(unsigned loc, const llvm::Value &val);
+
   Expr eval(unsigned loc, const llvm::Value &inst, bool complete = false);
-  Expr eval(unsigned loc, Expr v, bool complete = false);
+
+  Expr eval(unsigned loc, Expr u, bool complete = false);
+
   template <typename Out> Out &print(Out &out);
 
   ExprVector &get_implicant_formula() { return m_trace; }
@@ -169,5 +190,6 @@ public:
   const ExprMap &get_implicant_bools_map() const { return m_bool_map; }
 };
 } // namespace seahorn
-
+// implementation
+#include "seahorn/BmcImpl.hh"
 #endif

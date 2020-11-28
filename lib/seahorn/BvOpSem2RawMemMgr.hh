@@ -1,3 +1,5 @@
+#pragma once
+
 #include "BvOpSem2Context.hh"
 
 #include "llvm/IR/GetElementPtrTypeIterator.h"
@@ -46,6 +48,12 @@ public:
   /// Right now everything is an expression. In the future, we might have
   /// other types for PtrTy, such as a tuple of expressions
   using PtrTy = OpSemMemManager::PtrTy;
+  using MemValTy = OpSemMemManager::MemValTy;
+  using PtrSortTy = OpSemMemManager::PtrSortTy;
+  using MemSortTy = OpSemMemManager::MemSortTy;
+  using MemRegTy = OpSemMemManager::MemRegTy;
+  // setting TrackingTag to int disqualifies this class as having tracking
+  using TrackingTag = int;
 
   PtrTy ptrSort() const override { return m_ctx.alu().intTy(ptrSzInBits()); }
 
@@ -270,6 +278,10 @@ public:
   Expr setFatData(PtrTy p, unsigned SlotIdx, Expr data) override;
 
   Expr isDereferenceable(PtrTy p, Expr byteSz) override;
+
+  Expr isModified(PtrTy p, MemValTy mem) override;
+
+  MemValTy resetModified(PtrTy p, MemValTy mem) override;
 };
 } // namespace details
 } // namespace seahorn

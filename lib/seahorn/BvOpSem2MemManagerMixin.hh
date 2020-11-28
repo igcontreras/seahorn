@@ -2,9 +2,7 @@
 #include "BvOpSem2Context.hh"
 
 namespace seahorn {
-
-using namespace seahorn::details;
-
+namespace details {
 template <typename BaseT>
 class OpSemMemManagerMixin : public BaseT, public OpSemMemManager {
 
@@ -320,5 +318,13 @@ public:
   Expr isDereferenceable(PtrTy p, Expr byteSz) {
     return base().isDereferenceable(BasePtrTy(std::move(p)), byteSz);
   }
+
+  Expr isModified(PtrTy p, MemValTy mem) { return Expr(); }
+
+  MemValTy resetModified(PtrTy p, MemValTy mem) {
+    LOG("opsem", WARN << "resetModified() not implemented!\n");
+    return mem;
+  }
 };
+} // namespace details
 } // namespace seahorn

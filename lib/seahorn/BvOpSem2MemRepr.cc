@@ -16,6 +16,12 @@ namespace details {
 Expr OpSemMemArrayRepr::MemSet(Expr ptr, Expr _val, unsigned len, Expr mem,
                                unsigned wordSzInBytes, Expr ptrSort,
                                uint32_t align) {
+  // MemSet operates at word level.
+  // _val must fit within a byte
+  // _val is converted to a byte.
+  // byte is converted to a word
+  // e.g. _val = 0x1, len = 0x1, wordSzInBytes = 0x4 => 0x00000001
+  // e.g. _val = 0x1, len = 0x4, wordSzInBytes = 0x4 => 0x00000001
   Expr res;
 
   unsigned width;
@@ -37,6 +43,8 @@ Expr OpSemMemArrayRepr::MemSet(Expr ptr, Expr _val, unsigned len, Expr mem,
   return res;
 }
 
+// len is in bytes
+// _val must fit within a byte
 Expr OpSemMemArrayRepr::MemSet(Expr ptr, Expr _val, Expr len, Expr mem,
                                unsigned wordSzInBytes, Expr ptrSort,
                                uint32_t align) {
@@ -177,6 +185,7 @@ Expr OpSemMemLambdaRepr::storeAlignedWordToMem(Expr val, Expr ptr, Expr ptrSort,
   return mk<LAMBDA>(decl, ite);
 }
 
+// len is in bytes
 Expr OpSemMemLambdaRepr::MemSet(Expr ptr, Expr _val, unsigned len, Expr mem,
                                 unsigned wordSzInBytes, Expr ptrSort,
                                 uint32_t align) {

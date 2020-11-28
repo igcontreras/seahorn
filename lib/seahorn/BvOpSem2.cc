@@ -1,4 +1,5 @@
 #include "seahorn/BvOpSem2.hh"
+#include "BvOpSem2ExtraWideMemMgr.hh"
 #include "BvOpSem2RawMemMgr.hh"
 
 #include "llvm/CodeGen/IntrinsicLowering.h"
@@ -60,6 +61,11 @@ static llvm::cl::opt<bool> UseExtraWideMemory(
     "horn-bv2-extra-widemem",
     llvm::cl::desc(
         "Use extra wide memory model with base, offset and object size"),
+    cl::init(false));
+
+static llvm::cl::opt<bool> UseTrackingMemory(
+    "horn-bv2-tracking-mem",
+    llvm::cl::desc("Use Memory which stores metadata about Def and Use"),
     cl::init(false));
 
 static llvm::cl::opt<unsigned>
@@ -538,6 +544,10 @@ public:
         visitNondetCall(CS);
       else if (f->getName().startswith("sea.is_dereferenceable")) {
         visitIsDereferenceable(CS);
+      } else if (f->getName().startswith("sea.is_modified")) {
+        visitIsModified(CS);
+      } else if (f->getName().startswith("sea.reset_modified")) {
+        visitResetModified(CS);
       } else if (f->getName().startswith(("sea.assert.if"))) {
         visitSeaAssertIfCall(CS);
       } else if (f->getName().startswith(("verifier.assert"))) {
@@ -627,6 +637,40 @@ public:
     Expr byteSz = lookup(*CS.getArgument(1));
     Expr res = m_ctx.mem().isDereferenceable(ptr, byteSz);
     setValue(*CS.getInstruction(), res);
+  }
+
+  void visitIsModified(CallSite CS) {
+    if (!m_ctx.getMemReadRegister()) {
+      LOG("opsem", ERR << "No read register found - check if corresponding"
+                          "shadow instruction is present.");
+      m_ctx.setMemReadRegister(Expr());
+      return;
+    }
+    Expr ptr = lookup(*CS.getArgument(0));
+    auto memIn = m_ctx.read(m_ctx.getMemReadRegister());
+    OpSemMemManager &memManager = m_ctx.mem();
+    auto res = memManager.isModified(ptr, memIn);
+    setValue(*CS.getInstruction(), res);
+    m_ctx.setMemReadRegister(Expr());
+  }
+
+  void visitResetModified(CallSite CS) {
+    if (!m_ctx.getMemReadRegister() || !m_ctx.getMemWriteRegister()) {
+      LOG("opsem",
+          ERR << "No read/write register found - check if corresponding"
+                 "shadow instruction is present.");
+      m_ctx.setMemReadRegister(Expr());
+      m_ctx.setMemWriteRegister(Expr());
+      return;
+    }
+    Expr ptr = lookup(*CS.getArgument(0));
+    auto memIn = m_ctx.read(m_ctx.getMemReadRegister());
+    OpSemMemManager &memManager = m_ctx.mem();
+    auto res = memManager.resetModified(ptr, memIn);
+    m_ctx.write(m_ctx.getMemWriteRegister(), res);
+
+    m_ctx.setMemReadRegister(Expr());
+    m_ctx.setMemWriteRegister(Expr());
   }
 
   /// Report outcome of vacuity and incremental assertion checking
@@ -1124,12 +1168,16 @@ public:
 
       auto *parent = I.getParent();
       bool atBegin(parent->begin() == me);
+      // -- save instruction before the one being lowered
       if (!atBegin)
         --me;
       IntrinsicLowering IL(m_sem.getDataLayout());
       IL.LowerIntrinsicCall(&I);
-      auto top = atBegin ? &*parent->begin() : &*me;
+
+      // -- restore instruction pointer to the new lowered instructions
+      auto top = atBegin ? &*parent->begin() : &*(++me);
       m_ctx.setInstruction(*top);
+      m_ctx.setInstruction(*top, true);
 
       // -- add newly inserted instructions to COI, if I was in COI
       if (isInFilter) {
@@ -2029,7 +2077,12 @@ Bv2OpSemContext::Bv2OpSemContext(Bv2OpSem &sem, SymStore &values,
   else if (UseWideMemory) {
     mem = mkWideMemManager(m_sem, *this, ptrSize, wordSize, UseLambdas);
   } else if (UseExtraWideMemory) {
-    mem = mkExtraWideMemManager(m_sem, *this, ptrSize, wordSize, UseLambdas);
+    if (UseTrackingMemory) {
+      mem = mkTrackingExtraWideMemManager(m_sem, *this, ptrSize, wordSize,
+                                          UseLambdas);
+    } else {
+      mem = mkExtraWideMemManager(m_sem, *this, ptrSize, wordSize, UseLambdas);
+    }
   } else {
     mem = mkRawMemManager(m_sem, *this, ptrSize, wordSize, UseLambdas);
   }
@@ -2689,6 +2742,8 @@ bool Bv2OpSem::intraStep(seahorn::details::Bv2OpSemContext &C) {
   if (C.isAtBbEnd())
     return false;
 
+  // -- repeat flag can be set during intraStep and must be reset at the end
+  assert(!C.isRepeatInstruction());
   const Instruction &inst = C.getCurrentInst();
 
   // -- non-branch terminators are executed elsewhere
@@ -2706,6 +2761,11 @@ bool Bv2OpSem::intraStep(seahorn::details::Bv2OpSemContext &C) {
   }
 
   // -- advance instruction pointer if needed
+  if (C.isRepeatInstruction()) {
+    C.resetRepeatInstruction();
+    return true;
+  }
+
   if (!inst.isTerminator()) {
     ++C;
     return true;

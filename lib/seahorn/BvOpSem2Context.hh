@@ -7,10 +7,26 @@
 
 #include "seahorn/Expr/ExprLlvm.hh"
 #include "seahorn/Expr/Smt/EZ3.hh"
+
+#include <boost/hana.hpp>
+#include <type_traits>
 #include <unordered_set>
 
 namespace seahorn {
 namespace details {
+
+namespace MemoryFeatures {
+auto tag_of =
+    [](auto t) -> hana::type<typename decltype(t)::type::TrackingTag> {
+  return {};
+};
+// This empty class is used as a 'tag' to mark containing classes as enabling
+// tracking.
+struct Tracking_tag {};
+auto has_tracking = [](auto t) {
+  return hana::sfinae(tag_of)(t) == hana::just(hana::type<Tracking_tag>{});
+};
+} // namespace MemoryFeatures
 
 class OpSemAlu;
 class OpSemMemManager;
@@ -38,6 +54,9 @@ private:
 
   /// \brief Current instruction to be executed
   BasicBlock::const_iterator m_inst;
+
+  /// \brief True if the current instructions has to be repeated
+  bool m_repeat{false};
 
   /// \brief Previous basic block (or null if not known)
   const BasicBlock *m_prev;
@@ -169,9 +188,17 @@ public:
   /// \brief Currently executed instruction
   const Instruction &getCurrentInst() const { return *m_inst; }
   /// \brief Set instruction to be executed next
-  void setInstruction(const Instruction &inst) {
+  void setInstruction(const Instruction &inst, bool repeat = false) {
     m_inst = BasicBlock::const_iterator(&inst);
+    m_repeat = repeat;
   }
+
+  /// \brief True if the current instruction has to be executed again
+  bool isRepeatInstruction() const { return m_repeat; }
+
+  /// \brief Reset repeat instruction flag
+  void resetRepeatInstruction() { m_repeat = false; }
+
   /// \brief True if executing the last instruction in the current basic block
   bool isAtBbEnd() const { return m_inst == m_bb->end(); }
   /// \brief Move to next instructions in the basic block to execute
@@ -323,6 +350,7 @@ public:
   virtual bool isNum(Expr v) = 0;
   virtual bool isNum(Expr v, unsigned &bitWidth) = 0;
   virtual expr::mpz_class toNum(Expr v) = 0;
+  virtual Expr si(int k, unsigned bitWidth) = 0;
   virtual Expr si(expr::mpz_class k, unsigned bitWidth) = 0;
   virtual Expr doAdd(Expr op0, Expr op1, unsigned bitWidth) = 0;
   virtual Expr doSub(Expr op0, Expr op1, unsigned bitWidth) = 0;
@@ -478,10 +506,10 @@ public:
 };
 
 /// \brief Creates an instance of OpSemAllocator
-std::unique_ptr<OpSemAllocator> mkNormalOpSemAllocator(OpSemMemManager &mem,
-                                                       unsigned maxSymbAllocSz = 4096);
-std::unique_ptr<OpSemAllocator> mkStaticOpSemAllocator(OpSemMemManager &mem,
-                                                       unsigned maxSymbAllocSz = 4096);
+std::unique_ptr<OpSemAllocator>
+mkNormalOpSemAllocator(OpSemMemManager &mem, unsigned maxSymbAllocSz = 4096);
+std::unique_ptr<OpSemAllocator>
+mkStaticOpSemAllocator(OpSemMemManager &mem, unsigned maxSymbAllocSz = 4096);
 
 class OpSemMemManagerBase {
 protected:
@@ -733,6 +761,13 @@ public:
   /// \brief return True expr if number of bytes(byteSz) is within allocated
   /// bounds, False expr otherwise.
   virtual Expr isDereferenceable(PtrTy p, Expr byteSz) = 0;
+
+  /// \brief return True expr if memory has been modified since resetModified
+  // or allocation, whichever is later.
+  virtual Expr isModified(PtrTy p, MemValTy mem) = 0;
+
+  /// \brief reset memory modified state; used in conjuction with isModified
+  virtual MemValTy resetModified(PtrTy p, MemValTy mem) = 0;
 };
 
 OpSemMemManager *mkRawMemManager(Bv2OpSem &sem, Bv2OpSemContext &ctx,
@@ -807,8 +842,8 @@ public:
 
   Expr MemSet(Expr ptr, Expr _val, unsigned len, Expr mem,
               unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
-  Expr MemSet(Expr ptr, Expr _val, Expr len, Expr mem,
-              unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
+  Expr MemSet(Expr ptr, Expr _val, Expr len, Expr mem, unsigned wordSzInBytes,
+              Expr ptrSort, uint32_t align) override;
   Expr MemCpy(Expr dPtr, Expr sPtr, unsigned len, Expr memTrsfrRead,
               Expr memRead, unsigned wordSzInBytes, Expr ptrSort,
               uint32_t align) override;
@@ -844,8 +879,8 @@ public:
                              Expr mem) override;
   Expr MemSet(Expr ptr, Expr _val, unsigned len, Expr mem,
               unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
-  Expr MemSet(Expr ptr, Expr _val, Expr len, Expr mem,
-              unsigned wordSzInBytes, Expr ptrSort, uint32_t align) override;
+  Expr MemSet(Expr ptr, Expr _val, Expr len, Expr mem, unsigned wordSzInBytes,
+              Expr ptrSort, uint32_t align) override;
   Expr MemCpy(Expr dPtr, Expr sPtr, unsigned len, Expr memTrsfrRead,
               Expr memRead, unsigned wordSzInBytes, Expr ptrSort,
               uint32_t align) override;
