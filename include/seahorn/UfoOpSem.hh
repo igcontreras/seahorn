@@ -20,12 +20,12 @@ using ValueVector = std::vector<llvm::Value *>;
 
 struct CallSiteInfo {
 
-  CallSiteInfo(CallSite &cs, ExprVector &fparams, ValueVector &modValues)
-    : m_cs(cs), m_fparams(fparams), m_modValues(modValues) {}
+  CallSiteInfo(CallSite &cs, ExprVector &fparams, ValueVector &regionValues)
+      : m_cs(cs), m_fparams(fparams), m_regionValues(regionValues) {}
 
   CallSite &m_cs;
   ExprVector &m_fparams;
-  ValueVector &m_modValues;
+  ValueVector &m_regionValues;
 };
 
 /**

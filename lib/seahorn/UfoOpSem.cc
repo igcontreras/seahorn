@@ -141,6 +141,7 @@ struct OpSemBase {
   ExprVector m_outRegions;
 
   ValueVector m_outValues;
+  ValueVector m_regionValues;
 
   OpSemBase(SymStore &s, UfoOpSem &sem, ExprVector &side)
       : m_s(s), m_efac(m_s.getExprFactory()), m_sem(sem), m_side(side) {
@@ -178,8 +179,13 @@ struct OpSemBase {
   void addCondSide(Expr c) { side(c, true); }
 
   void side(Expr v, bool conditional = false) {
+
     if (!v)
       return;
+
+    // if (isOpX<EQ>(v))
+    //   assert(isOpX<EQ>(v) && !finite_map::returnsFiniteMap(v->left()));
+
     if (!GlobalConstraints || conditional)
       m_side.push_back(boolop::limp(m_activeLit, v));
     else
@@ -769,7 +775,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       // error flag out
       m_fparams[2] = (m_s.havoc(m_sem.errorFlag(BB)));
 
-      CallSiteInfo csi(CS, m_fparams, m_outValues);
+      CallSiteInfo csi(CS, m_fparams, m_regionValues);
       m_sem.execCallSite(csi, m_side, m_s);
 
       // reseting parameter structures
@@ -781,6 +787,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
       m_inRegions.clear();
       m_outRegions.clear();
       m_outValues.clear();
+      m_regionValues.clear();
     } else if (F.getName().startswith("shadow.mem")) {
       if (!m_sem.isTracked(I))
         return;
@@ -808,19 +815,20 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         }
       } else if (F.getName().equals("shadow.mem.arg.ref")) {
         m_fparams.push_back(m_s.read(symb(*CS.getArgument(1))));
-        m_outValues.push_back(CS.getArgument(1));
+        m_regionValues.push_back(CS.getArgument(1));
       } else if (F.getName().equals("shadow.mem.arg.mod")) {
         auto in_par = m_s.read(symb(*CS.getArgument(1)));
-        m_outValues.push_back(CS.getArgument(1));
+        m_regionValues.push_back(CS.getArgument(1));
         m_fparams.push_back(in_par);
         m_inRegions.push_back(in_par);
         auto out_par = m_s.havoc(symb(I));
         m_fparams.push_back(out_par);
         m_outRegions.push_back(out_par);
         m_outValues.push_back(&I);
+        m_regionValues.push_back(&I);
       } else if (F.getName().equals("shadow.mem.arg.new")) {
         m_fparams.push_back(m_s.havoc(symb(I)));
-        m_outValues.push_back(&I);
+        m_regionValues.push_back(&I);
       } else if (!PF.getName().equals("main") &&
                  F.getName().equals("shadow.mem.in")) {
         m_s.read(symb(*CS.getArgument(1)));
@@ -844,7 +852,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         if (m_sem.isAbstracted(*f)) {
           assert(m_inRegions.size() && m_outRegions.size());
           for (unsigned i = 0; i < m_inRegions.size(); i++) {
-            if (finite_map::returnsFiniteMap(m_outRegions[i]))
+            if (finite_map::returnsFiniteMap(m_inRegions[i]))
               write(*m_outValues[i], m_inRegions[i]);
             else
               addCondSide(mk<EQ>(m_outRegions[i], m_inRegions[i]));
@@ -854,14 +862,14 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         } else {
           WARN << "skipping a call to " << F.getName()
                << " (maybe a recursive call?)"; // treated as noop for fmaps
-          for (unsigned i = 0; i < m_inRegions.size(); i++) {
+          for (unsigned i = 0; i < m_inRegions.size(); i++)
             write(*m_outValues[i], m_inRegions[i]);
-          }
         }
         m_fparams.resize(3);
         m_inRegions.clear();
         m_outRegions.clear();
         m_outValues.clear();
+        m_regionValues.clear();
       }
 
       visitInstruction(*CS.getInstruction());
@@ -949,7 +957,10 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
     if (!m_inMem || !m_outMem)
       return;
     else if (!m_sem.isTracked(*I.getOperand(0))) { // treated as noop
-      m_side.push_back(mk<EQ>(m_outMem, m_inMem));
+      if(finite_map::returnsFiniteMap(m_inMem))
+        write(*m_outValue, m_inMem);
+      else
+        m_side.push_back(mk<EQ>(m_outMem, m_inMem));
       return;
     }
 
@@ -1049,13 +1060,14 @@ struct OpSemPhiVisitor : public InstVisitor<OpSemPhiVisitor>, OpSemBase {
       PHINode &phi = *cast<PHINode>(curr);
       if (!m_sem.isTracked(phi))
         continue;
-      Expr lhs = havoc(phi);
-      Expr act = GlobalConstraints ? trueE : m_activeLit; // TODO: unused?
+      // Expr act = GlobalConstraints ? trueE : m_activeLit; // TODO: unused?
       Expr op0 = ops[i++];
 
-      if (finite_map::returnsFiniteMap(op0)) {
+      // TODO: why would `op0` be null? (see lookup(v))
+      if (op0 && finite_map::returnsFiniteMap(op0)) {
         write(phi, op0);
       } else {
+        Expr lhs = havoc(phi);
         side(lhs, op0);
       }
     }
@@ -1916,7 +1928,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     recInlineDefs(kv.first, kv.second, extraDefs, added, s);
 
   auto r_it = fi.regions.begin();
-  auto v_it = csi.m_modValues.begin();
+  auto v_it = csi.m_regionValues.begin();
   for (int i = 3; i < csi.m_fparams.size(); i++) {
     Expr param = csi.m_fparams[i];
 

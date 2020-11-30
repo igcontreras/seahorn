@@ -160,7 +160,7 @@ bool HornSolver::runOnModule(Module &M) {
   params.set(":spacer.max_num_contexts", PdrContexts);
   params.set(":spacer.elim_aux", true);
   params.set(":spacer.reach_dnf", true);
-  params.set("print_statistics", true);
+  params.set(":print_statistics", true);
   params.set(":spacer.use_bg_invs", UseInvariant == solver_detail::INACTIVE ||
                                         UseInvariant == solver_detail::BG_ONLY);
   params.set(":spacer.weak_abs", WeakAbs);
