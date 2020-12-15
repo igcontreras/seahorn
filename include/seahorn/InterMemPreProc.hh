@@ -107,7 +107,7 @@ public:
   expr::ExprVector &getKeysCellSummary(const Cell &c, const Function *f);
   expr::ExprVector &getKeysCellCS(const Cell &cCallee, const Instruction *i);
 
-  void precomputeFiniteMapTypes(CallSite &CS);
+  void precomputeFiniteMapTypes(CallSite &CS, const NodeSet &safe);
 
   inline std::pair<const Node *, unsigned> cellToPair(const Cell &c) {
     return std::make_pair(c.getNode(), getOffset(c));
@@ -115,8 +115,7 @@ public:
 
 private:
   void recProcessNode(const Cell &cFrom, const NodeSet &fromSafeNodes,
-                      const NodeSet &toSafeNodes, SimulationMapper &simMap,
-                      CellInfoMap &cim);
+                      SimulationMapper &simMap, CellInfoMap &cim);
   template <typename ValueT>
   ValueT &findCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT> &map,
                       const Cell &c);

@@ -203,8 +203,7 @@ public:
                std::shared_ptr<InterMemPreProc> preproc,
                TrackLevel trackLvl = MEM,
                FunctionPtrSet abs_fns = FunctionPtrSet(), ShadowMem *dsa = NULL)
-      : MemUfoOpSem(efac, pass, dl, preproc, trackLvl, abs_fns, dsa)
-  {
+      : MemUfoOpSem(efac, pass, dl, preproc, trackLvl, abs_fns, dsa) {
     m_keyBase = mkTerm<std::string>("k", efac);
     m_fmDefault = mkTerm<expr::mpz_class>(0UL, m_efac);
   }
@@ -266,10 +265,10 @@ private:
   FunctionCellExprMap m_fInitSymNodes;
 
   void recVCGenMem(const Cell &c_callee, Expr ptrInt, Expr ptrOut,
-                   const NodeSet &safeNodesCe, const NodeSet &safeNodesCr,
-                   SimulationMapper &simMap, const Function &F);
+                   const NodeSet &safeNodesCe, SimulationMapper &simMap,
+                   const Function &F);
 
-  Expr fmVariant(Expr e, const Cell&c, const ExprVector &keys);
+  Expr fmVariant(Expr e, const Cell &c, const ExprVector &keys);
   void addKeyValCell(const Cell &cCr, const Cell &cCe, Expr basePtr,
                      unsigned offset);
   void storeVal(const Cell &cCr, const Cell &cSAS, Expr readFrom, Expr basePtr,
@@ -303,9 +302,8 @@ private:
   Expr getFreshMapSymbol(const Cell &cCr, const Cell &cCe, const Function &F,
                          MemOpt ao);
   void recCollectReachableKeys(const Cell &c, const Function &F, Expr basePtr,
-                               const NodeSet &safeNsBU, const NodeSet &safeNs,
-                               SimulationMapper &sm, CellKeysMap &nkm,
-                               CellExprMap &nim);
+                               const NodeSet &safeNsBU, SimulationMapper &sm,
+                               CellKeysMap &nkm, CellExprMap &nim);
 
   void recInlineDefs(const Expr map, const Expr def, ExprMap &defs,
                      ExprSet &added, SymStore &s);
