@@ -1806,11 +1806,13 @@ static bool checkArgs(Expr fapp) {
 
   for (; arg_it != fapp->args_end(); arg_it++, t_it++) {
     Expr argTy = *t_it;
+    Expr arg = *arg_it;
     if (isOpX<FINITE_MAP_TY>(argTy)) {
-      Expr arg = *arg_it;
       assert(finite_map::returnsFiniteMap(arg));
-      assert(finite_map::fmapDefValues(arg)->arity() == sort::finiteMapKeyTy(argTy)->arity());
-    }
+      assert(finite_map::fmapDefValues(arg)->arity() ==
+             sort::finiteMapKeyTy(argTy)->arity());
+    } else
+      assert(!finite_map::returnsFiniteMap(arg));
   }
   return true;
 }
@@ -1845,16 +1847,20 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
   CallSite &CS = csi.m_cs;
   Graph &calleeG = ga.getSummaryGraph(*calleeF);
-  NodeSet &safeNodesCe = m_preproc->getSafeNodesBU(calleeF);
-  SimulationMapper &simMap = m_preproc->getSimulationCS(CS);
-  m_preproc->precomputeFiniteMapTypes(CS, safeNodesCe);
+  NodeSet &safeNodesBuCe = m_preproc->getSafeNodesBU(calleeF);
+  NodeSet &safeNodesSAS = m_preproc->getSafeNodes(calleeF);
+  SimulationMapper &smCS = m_preproc->getSimulationCS(CS);
+  SimulationMapper &smCI = m_preproc->getSimulationF(calleeF);
+
+  m_preproc->precomputeFiniteMapTypes(CS, safeNodesBuCe, safeNodesSAS);
   m_csInst = CS.getInstruction(); // TODO: remove?
 
   for (const Argument *arg : fi.args) {
     Expr aE = s.read(symb(*CS.getArgument(arg->getArgNo())));
     csi.m_fparams.push_back(aE);
     if (calleeG.hasCell(*arg)) // checking that the argument is a pointer
-      recVCGenMem(calleeG.getCell(*arg), aE, aE, safeNodesCe, simMap, *calleeF);
+      recVCGenMem(calleeG.getCell(*arg), aE, aE, safeNodesBuCe, safeNodesSAS,
+                  smCS, smCI, *calleeF);
   }
 
   for (const GlobalVariable *gv : fi.globals)
@@ -1866,11 +1872,11 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   // depending of the globals that are live, we are copying everything
   for (auto &kv : calleeG.globals()) {
     const Cell &c = *kv.second;
-    Cell cCr = simMap.get(c);
+    Cell cCr = smCS.get(c);
     if (hasOrigMemSymbol(cCr, MemOpt::IN) ||
         hasOrigMemSymbol(cCr, MemOpt::OUT)) {
       Expr gE = s.read(symb(*kv.first));
-      recVCGenMem(c, gE, gE, safeNodesCe, simMap, *calleeF);
+      recVCGenMem(c, gE, gE, safeNodesBuCe, safeNodesSAS, smCS, smCI, *calleeF);
     }
   }
 
@@ -1878,10 +1884,10 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     Expr rE = s.havoc(symb(*csi.m_cs.getInstruction()));
     csi.m_fparams.push_back(rE);
     if (calleeG.hasCell(*fi.ret)) {
-      const Cell &c = calleeG.getCell(*fi.ret); // no
-      if (c.getNode()->isModified() &&
-          hasOrigMemSymbol(simMap.get(c), MemOpt::OUT))
-        recVCGenMem(c, rE, rE, safeNodesCe, simMap, *calleeF);
+      const Cell &c = calleeG.getCell(*fi.ret);
+      // if (c.getNode()->isModified() &&
+      //     hasOrigMemSymbol(smCS.get(c), MemOpt::OUT))
+      recVCGenMem(c, rE, rE, safeNodesBuCe, safeNodesSAS, smCS, smCI, *calleeF);
     }
   }
 
@@ -2070,36 +2076,42 @@ Expr FMapUfoOpSem::fmVariant(Expr e, const Cell &c, const ExprVector &keys) {
 }
 
 void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
-                               const NodeSet &safeNodesCe,
-                               SimulationMapper &simMap, const Function &F) {
+                               const NodeSet &safeNodesCeBu,
+                               const NodeSet &safeNodesCeSas,
+                               SimulationMapper &smCS, SimulationMapper &smCI,
+                               const Function &F) {
 
   const Node *nCe = cCe.getNode();
 
-  if (nCe->types().empty() || !m_preproc->isSafeNode(safeNodesCe, nCe))
+  if (nCe->types().empty() || !m_preproc->isSafeNode(safeNodesCeBu, nCe))
     return;
 
-  const Cell &cCr = simMap.get(cCe);
+  const Cell &cCr = smCS.get(cCe);
 
-  if (m_preproc->getNumCIAccessesCellSummary(cCe, &F) <= MaxKeys) {
+  if ((m_preproc->isSafeNode(safeNodesCeSas, smCI.get(cCe).getNode())) &&
+      // checking if the node is bounded context-insensitive
+      (m_preproc->getNumCIAccessesCellSummary(cCe, &F) <= MaxKeys)) {
     // -- copy accessed fields of the node
     for (auto field : cCe.getNode()->types()) {
       unsigned offset = field.getFirst();
 
       Cell cCeField(cCe, offset);
-      Cell cCrField = simMap.get(cCeField);
-      Cell cCeSAS = m_preproc->getSimulationF(&F).get(cCeField);
+      Cell cCrField = smCS.get(cCeField);
+      Cell cCeSAS = smCI.get(cCeField);
 
       // -- if the field is represented with a
       // scalar, or it has 0 accesses skip the copy
       if (isMemScalar(cCrField) || (m_preproc->getNumAccesses(cCeSAS, &F) == 0))
         continue;
 
-      if (hasOrigMemSymbol(cCrField, MemOpt::IN)) {
+      if (cCeSAS.getNode()->isRead()) {
+        assert(hasOrigMemSymbol(cCrField, MemOpt::IN));
         // force creation of a new mem symbol for later
         getFreshMapSymbol(cCrField, cCeSAS, F, MemOpt::IN);
         addKeyValCell(cCrField, cCeSAS, basePtrIn, offset);
       }
-      if (hasOrigMemSymbol(cCrField, MemOpt::OUT)) {
+      if (cCeSAS.getNode()->isModified()) {
+        assert(hasOrigMemSymbol(cCrField, MemOpt::OUT));
         Expr readFrom = getFreshMapSymbol(cCrField, cCeSAS, F, MemOpt::OUT);
         storeVal(cCrField, cCeSAS, readFrom, basePtrOut, offset);
       }
@@ -2128,7 +2140,8 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
     Expr nextPtrIn = memObtainValue(origIn, addOffset(basePtrIn, offset));
     Expr nextPtrOut = memObtainValue(origOut, addOffset(basePtrOut, offset));
     // out already copied in the fields loop
-    recVCGenMem(next_c, nextPtrIn, nextPtrOut, safeNodesCe, simMap, F);
+    recVCGenMem(next_c, nextPtrIn, nextPtrOut, safeNodesCeBu, safeNodesCeSas,
+                smCS, smCI, F);
   }
 }
 
@@ -2299,12 +2312,14 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
   SimulationMapper &sm = m_preproc->getSimulationF(&F);
   Graph &buG = ga.getSummaryGraph(F);
   Graph &sasG = ga.getGraph(F);
+  NodeSet &safe = m_preproc->getSafeNodes(&F);
   NodeSet &safeBU = m_preproc->getSafeNodesBU(&F);
 
   for (const Argument &arg : F.args()) {
     if (buG.hasCell(arg)) { // checking that the argument is a pointer
       Expr argE = s.read(symb(arg));
-      recCollectReachableKeys(buG.getCell(arg), F, argE, safeBU, sm, ckm, nim);
+      recCollectReachableKeys(buG.getCell(arg), F, argE, safeBU, safe, sm, ckm,
+                              nim);
     }
   }
   // assign a key to every distinct cell of every memory region of main
@@ -2313,14 +2328,14 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
   for (auto &kv : buG.globals()) {
     Expr argE = s.read(symb(*kv.first));
     const Cell &c = *kv.second;
-    recCollectReachableKeys(c, F, argE, safeBU, sm, ckm, nim);
+    recCollectReachableKeys(c, F, argE, safeBU, safe, sm, ckm, nim);
   }
 
   if (fi.ret) {
     Expr retE = s.read(symb(*CS.getInstruction()));
     if (buG.hasCell(*fi.ret)) {
       const Cell &c = buG.getCell(*fi.ret);
-      recCollectReachableKeys(c, F, retE, safeBU, sm, ckm, nim);
+      recCollectReachableKeys(c, F, retE, safeBU, safe, sm, ckm, nim);
     }
   }
 
@@ -2353,6 +2368,7 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
 void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
                                            Expr basePtr,
                                            const NodeSet &safeBUNs,
+                                           const NodeSet &safeNs,
                                            SimulationMapper &sm,
                                            CellKeysMap &ckm, CellExprMap &nim) {
 
@@ -2362,7 +2378,8 @@ void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
     return;
 
   const Cell &cSAS = sm.get(cBU);
-  if (m_preproc->getNumAccesses(cSAS, &F) <= MaxKeys)
+  if (m_preproc->isSafeNode(safeNs, cSAS.getNode()) &&
+      (m_preproc->getNumAccesses(cSAS, &F) <= MaxKeys))
     for (auto field : cBU.getNode()->types()) {
       unsigned offset = field.getFirst();
       Cell cBUField(cBU, offset);
@@ -2390,7 +2407,7 @@ void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
 
     Expr memS = getExprCell(nim, nextSAS);
     Expr nextPtr = memObtainValue(memS, addOffset(basePtr, f.getOffset()));
-    recCollectReachableKeys(next_c, F, nextPtr, safeBUNs, sm, ckm, nim);
+    recCollectReachableKeys(next_c, F, nextPtr, safeBUNs, safeNs, sm, ckm, nim);
   }
 }
 

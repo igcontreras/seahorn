@@ -264,8 +264,9 @@ private:
   using FunctionCellExprMap = std::map<const Function *, CellExprMap>;
   FunctionCellExprMap m_fInitSymNodes;
 
-  void recVCGenMem(const Cell &c_callee, Expr ptrInt, Expr ptrOut,
-                   const NodeSet &safeNodesCe, SimulationMapper &simMap,
+  void recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
+                   const NodeSet &safeNodesCeBu, const NodeSet &safeNodesCeSas,
+                   SimulationMapper &smCS, SimulationMapper &smCI,
                    const Function &F);
 
   Expr fmVariant(Expr e, const Cell &c, const ExprVector &keys);
@@ -302,7 +303,8 @@ private:
   Expr getFreshMapSymbol(const Cell &cCr, const Cell &cCe, const Function &F,
                          MemOpt ao);
   void recCollectReachableKeys(const Cell &c, const Function &F, Expr basePtr,
-                               const NodeSet &safeNsBU, SimulationMapper &sm,
+                               const NodeSet &safeNsBU,
+                               const NodeSet &safeNsSAS, SimulationMapper &sm,
                                CellKeysMap &nkm, CellExprMap &nim);
 
   void recInlineDefs(const Expr map, const Expr def, ExprMap &defs,
