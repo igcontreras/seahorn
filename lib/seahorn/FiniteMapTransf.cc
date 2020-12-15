@@ -63,6 +63,7 @@ static Expr mkFappArgsCore(Expr fapp, Expr newFdecl, ExprVector &extraUnifs,
       unsigned nKs = sort::finiteMapKeyTy(argTy)->arity();
 
       if (bind::isFiniteMapConst(arg)) { // it should not happen?
+        assert(false);
         Expr ksTy = sort::finiteMapKeyTy(bind::rangeTy(bind::fname(arg)));
         // the keys are obtained from the const, not the type. The Dsa info
         // of the type is relative to the function (context insensitive), the

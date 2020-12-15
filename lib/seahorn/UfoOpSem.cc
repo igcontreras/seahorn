@@ -1805,15 +1805,11 @@ static bool checkArgs(Expr fapp) {
   auto arg_it = ++(fapp->args_begin()), t_it = ++(fdecl->args_begin());
 
   for (; arg_it != fapp->args_end(); arg_it++, t_it++) {
-    Expr arg = *arg_it;
-    if (bind::IsConst()(arg)) {
-      Expr argTy = *t_it;
-      if (!isOpX<FINITE_MAP_TY>(argTy)) {
-        assert(bind::rangeTy(bind::fname(arg)) == argTy);
-      } else {
-        assert(arg->left()->right()->right()->arity() ==
-               argTy->right()->arity());
-      }
+    Expr argTy = *t_it;
+    if (isOpX<FINITE_MAP_TY>(argTy)) {
+      Expr arg = *arg_it;
+      assert(finite_map::returnsFiniteMap(arg));
+      assert(finite_map::fmapDefValues(arg)->arity() == sort::finiteMapKeyTy(argTy)->arity());
     }
   }
   return true;
