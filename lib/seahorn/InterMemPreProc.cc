@@ -50,9 +50,13 @@ struct ExplorationInfo {
 static void propagateUnsafeChildren(const Node &n, const Node &nCaller,
                                     ExplorationInfo &ei) {
 
-  // if (isSafeNode(ei.m_calleeUnsafe, &n))
+  if (!n.isModified() && !n.isRead()) {
+    // if not read or modified, mark as explored but not unbounded
+    ei.m_explColor[&n] = EColor::BLACK;
+    return;
+  }
+
   ei.m_calleeUnsafe.insert(&n); // store the ones that are not safe
-                                // if (isSafeNode(ei.m_callerUnsafe, &nCaller))
   ei.m_callerUnsafe.insert(&nCaller);
 
   ei.m_explColor[&n] = EColor::BLACK;
@@ -78,7 +82,9 @@ static void exploreNode(const Node &nCallee, const Node &nCaller,
 
   assert(ei.m_explColor.count(&nCallee) == 0);
 
-  if (isUnboundedMem(&nCallee, &nCaller)) {
+  if (!nCallee.isModified() && !nCallee.isRead())
+    ei.m_explColor[&nCallee] = EColor::BLACK;
+  else if (isUnboundedMem(&nCallee, &nCaller)) {
     propagateUnsafeChildren(nCallee, nCaller, ei);
   } else {
     ei.m_explColor[&nCallee] = EColor::GRAY;
@@ -142,7 +148,7 @@ static void computeSafeNodesSimulation(Graph &fromG, const Function &F,
     Node *nTo = sm.get(*nFrom).getNode();
     if (isSafeNode(toUnsafe, nTo))
       toSafe.insert(nTo);
-    if(isSafeNode(fromUnsafe,nFrom))
+    if (isSafeNode(fromUnsafe, nFrom))
       fromSafe.insert(nFrom);
   }
 }
