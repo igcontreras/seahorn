@@ -1809,8 +1809,8 @@ static bool checkArgs(Expr fapp) {
     Expr arg = *arg_it;
     if (isOpX<FINITE_MAP_TY>(argTy)) {
       assert(finite_map::returnsFiniteMap(arg));
-      assert(finite_map::fmapDefValues(arg)->arity() ==
-             sort::finiteMapKeyTy(argTy)->arity());
+      // assert(finite_map::fmapDefValues(arg)->arity() ==
+      //        sort::finiteMapKeyTy(argTy)->arity());
     } else
       assert(!finite_map::returnsFiniteMap(arg));
   }
@@ -1852,8 +1852,10 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   SimulationMapper &smCS = m_preproc->getSimulationCS(CS);
   SimulationMapper &smCI = m_preproc->getSimulationF(calleeF);
 
+  // this is necessary because the names of the keys are used to decide
+  // aliasing, therefore they depend on the callsite because we are context
+  // sensitive
   m_preproc->precomputeFiniteMapTypes(CS, safeNodesBuCe, safeNodesSAS);
-  m_csInst = CS.getInstruction(); // TODO: remove?
 
   for (const Argument *arg : fi.args) {
     Expr aE = s.read(symb(*CS.getArgument(arg->getArgNo())));
@@ -1866,10 +1868,10 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   for (const GlobalVariable *gv : fi.globals)
     csi.m_fparams.push_back(s.read(symb(*gv)));
 
-  // Copying more than necessary, the keys and values that are not reachable
+  // Copying more than necessary. The keys and values that are not reachable
   // from the live globals could be replaced by fresh consts. However, to
-  // preserve the same order, to avoid having many different contexts
-  // depending of the globals that are live, we are copying everything
+  // preserve the same order to avoid having many different contexts depending
+  // of the globals that are live, we are copying everything
   for (auto &kv : calleeG.globals()) {
     const Cell &c = *kv.second;
     Cell cCr = smCS.get(c);
@@ -1968,41 +1970,40 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       }
       LOG("fmap_param",
           errs() << " [OUT] replaced " << *csi.m_fparams[i] << " by: ";);
-    } else if (finite_map::returnsFiniteMap(param) && // unused param
-               isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)))
+    } else if ((finite_map::returnsFiniteMap(param) &&
+                isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)))
+               // -- the memory region does not exist in the bu graph of the
+               // callee but is still passed (as an array)
+               || (OpSemVisitor::returnsArray(param) &&
+                   isOpX<FINITE_MAP_TY>(fi.sumPred->arg(i + 1)))
+               // -- the node was found to be bounded but later not found as
+               // live symbol
+               )
     // +1 because fi.sumpPred->arg(0) is the function name
-    {
-      LOG("fmap-node", assert(false && "Oversharing"));
-      // -- the memory region does not exist in the bu graph of the callee but
-      // is still passed (as an array)
-      // -- create a fresh array (not reachable in the callee bu)
+    { // unused param
+      LOG("fmap-node", assert(!(finite_map::returnsFiniteMap(param) &&
+                                isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1))) &&
+                              "Oversharing"));
+      // -- create a fresh const
       csi.m_fparams[i] =
           bind::mkConst(variant::variant(0, param), fi.sumPred->arg(i + 1));
-      LOG("fmap_param", errs() << " [CONST] replaced " << *param
+      LOG("fmap_param", errs() << " [NOT RELEVANT] replaced " << *param
                                << " by: " << *csi.m_fparams[i] << "\n";);
-      const Node *nOut = m_exprCell[param].first;
-      if (!nOut->isRead() && nOut->isModified() &&
-          bind::isFiniteMapConst(param)) {
-        csi.m_fparams[i] = extraDefs[m_cellReplaceOut[pair]];
-        LOG("fmap_param", errs() << " [ONLY OUT] replaced " << *param
-                                 << " by: " << *csi.m_fparams[i] << "\n";);
-      } else if (i < csi.m_fparams.size()) { // output of unused param
+      const Node *nOut = regionCeCell.getNode();
+      if (nOut->isRead() && nOut->isModified()) {
+        // -- add memOut = memIn (not accessed in this function)
         Expr nextParam = csi.m_fparams[i + 1];
-        if (*r_it == *(r_it + 1)) {
-          // -- add memOut = memIn (not accessed in this function)
-          if (OpSemVisitor::returnsArray(nextParam))
-            arrayStores.push_back(mk<EQ>(nextParam, param));
-          else
-            s.write(symb(**v_it), param);
-          i++;
-          r_it++;
-          v_it++;
-          assert(isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)));
-          csi.m_fparams[i] = bind::mkConst(variant::variant(0, nextParam),
-                                           fi.sumPred->arg(i + 1));
-          LOG("fmap_param", errs() << " [NOT RELEVANT] replaced " << *nextParam
-                                   << " by: " << *csi.m_fparams[i] << "\n";);
-        }
+        if (OpSemVisitor::returnsArray(nextParam))
+          arrayStores.push_back(mk<EQ>(nextParam, param));
+        else
+          s.write(symb(**v_it), param);
+        i++;
+        r_it++;
+        v_it++;
+        csi.m_fparams[i] = bind::mkConst(variant::variant(0, nextParam),
+                                         fi.sumPred->arg(i + 1));
+        LOG("fmap_param", errs() << " [NOT RELEVANT] replaced " << *nextParam
+                                 << " by: " << *csi.m_fparams[i] << "\n";);
       }
     }
     r_it++;
@@ -2035,7 +2036,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   m_cellKeysOut.clear();
   m_cellValuesOut.clear();
   m_cellValuesIn.clear();
-} // namespace seahorn
+}
 
 void FMapUfoOpSem::recInlineDefs(const Expr map, const Expr def, ExprMap &defs,
                                  ExprSet &added, SymStore &s) {
@@ -2086,8 +2087,6 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
   if (nCe->types().empty() || !m_preproc->isSafeNode(safeNodesCeBu, nCe))
     return;
 
-  const Cell &cCr = smCS.get(cCe);
-
   if ((m_preproc->isSafeNode(safeNodesCeSas, smCI.get(cCe).getNode())) &&
       // checking if the node is bounded context-insensitive
       (m_preproc->getNumCIAccessesCellSummary(cCe, &F) <= MaxKeys)) {
@@ -2124,15 +2123,15 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
   // -- follow the links of the node
   for (auto &links : nCe->getLinks()) {
     const Field &f = links.first;
-    const Cell &next_c = *links.second;
-    const Node *next_n = next_c.getNode();
+    const Cell &nextCeField = *links.second;
+    const Cell nextCr = smCS.get(nextCeField);
+    Cell nextCeSAS = smCI.get(nextCeField);
 
-    const Cell nextCr(cCr, f.getOffset());
-
-    Expr origIn = hasOrigMemSymbol(nextCr, MemOpt::IN)
+    // TODO: replace by consulting SAS node
+    Expr origIn = nextCeSAS.getNode()->isRead()
                       ? getOrigMemSymbol(nextCr, MemOpt::IN)
                       : getOrigMemSymbol(nextCr, MemOpt::OUT);
-    Expr origOut = hasOrigMemSymbol(nextCr, MemOpt::OUT)
+    Expr origOut = nextCeSAS.getNode()->isModified()
                        ? getOrigMemSymbol(nextCr, MemOpt::OUT)
                        : origIn;
 
@@ -2140,8 +2139,8 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
     Expr nextPtrIn = memObtainValue(origIn, addOffset(basePtrIn, offset));
     Expr nextPtrOut = memObtainValue(origOut, addOffset(basePtrOut, offset));
     // out already copied in the fields loop
-    recVCGenMem(next_c, nextPtrIn, nextPtrOut, safeNodesCeBu, safeNodesCeSas,
-                smCS, smCI, F);
+    recVCGenMem(nextCeField, nextPtrIn, nextPtrOut, safeNodesCeBu,
+                safeNodesCeSas, smCS, smCI, F);
   }
 }
 
@@ -2397,17 +2396,17 @@ void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
 
   // -- follow the links of the node
   for (auto &links : nBU->getLinks()) {
-    const Field &f = links.first;
-    const Cell &next_c = *links.second;
-    const Node *next_n = next_c.getNode();
-    const Cell nextSAS(cSAS, f.getOffset());
+    const Cell &nextCBU = *links.second;
+    const Cell nextCSAS = sm.get(nextCBU);
 
-    if (!hasExprCell(nim, nextSAS))
+    if (!hasExprCell(nim, nextCSAS))
       continue;
 
-    Expr memS = getExprCell(nim, nextSAS);
+    const Field &f = links.first;
+    Expr memS = getExprCell(nim, nextCSAS);
     Expr nextPtr = memObtainValue(memS, addOffset(basePtr, f.getOffset()));
-    recCollectReachableKeys(next_c, F, nextPtr, safeBUNs, safeNs, sm, ckm, nim);
+    recCollectReachableKeys(nextCBU, F, nextPtr, safeBUNs, safeNs, sm, ckm,
+                            nim);
   }
 }
 

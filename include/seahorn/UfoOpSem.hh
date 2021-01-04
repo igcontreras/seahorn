@@ -254,8 +254,6 @@ private:
   // -- default value for uninitialized values of maps
   Expr m_fmDefault;
 
-  Instruction *m_csInst; // callsite that we are processing
-
   using CellKeysMap =
       DenseMap<std::pair<const seadsa::Node *, unsigned>, ExprVector>;
   using FunctionCellKeysMap = std::map<const Function *, CellKeysMap>;

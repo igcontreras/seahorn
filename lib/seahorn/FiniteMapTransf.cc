@@ -62,8 +62,9 @@ static Expr mkFappArgsCore(Expr fapp, Expr newFdecl, ExprVector &extraUnifs,
     if (isOpX<FINITE_MAP_TY>(argTy)) {
       unsigned nKs = sort::finiteMapKeyTy(argTy)->arity();
 
-      if (bind::isFiniteMapConst(arg)) { // it should not happen?
-        assert(false);
+      if (bind::isFiniteMapConst(arg)) {
+        // generated when the node is bounded but not live
+        evars.erase(arg);
         Expr ksTy = sort::finiteMapKeyTy(bind::rangeTy(bind::fname(arg)));
         // the keys are obtained from the const, not the type. The Dsa info
         // of the type is relative to the function (context insensitive), the
