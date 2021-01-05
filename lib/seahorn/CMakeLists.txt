@@ -18,6 +18,7 @@ add_llvm_library (seahorn.LIB DISABLE_LLVM_LINK_LLVM_DYLIB
   GuessCandidates.cc
   HornCex.cc
   CexHarness.cc
+  CexExeGenerator.cc
   ClpWrite.cc
   HornClauseDB.cc
   HornClauseDBTransf.cc
@@ -45,7 +46,6 @@ add_llvm_library (seahorn.LIB DISABLE_LLVM_LINK_LLVM_DYLIB
   BvOpSem2RawMemMgr.cc
   BvOpSem2FatMemMgr.cc
   BvOpSem2WideMemMgr.cc
-  BvOpSem2WideMemManagerMixin.cc
   BvOpSem2TrackingRawMemMgr.cc
   BvOpSem2ExtraWideMemMgr.cc
   VCGen.cc

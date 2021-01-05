@@ -19,7 +19,7 @@ static const unsigned int g_slotByteWidth = g_slotBitWidth / 8;
 
 static const unsigned int g_maxFatSlots = 2;
 /// \brief provides Fat pointers and Fat memory to store them
-class FatMemManager : public OpSemMemManagerBase {
+class FatMemManager : public MemManagerCore {
 public:
   /// PtrTy representation for this manager
   ///
@@ -46,6 +46,9 @@ public:
     Expr toExpr() const { return v(); }
     explicit operator Expr() const { return toExpr(); }
   };
+
+  using FatMemTag = MemoryFeatures::FatMem_tag;
+  using TrackingTag = int;
 
   /// Right now everything is an expression. In the future, we might have
   /// other types for PtrTy, such as a tuple of expressions
@@ -77,8 +80,8 @@ private:
 
   /// \brief Converts a raw ptr to fat ptr with default value for fat
   FatPtrTy mkFatPtr(RawPtrTy rawPtr) const {
-    return strct::mk(rawPtr, m_ctx.alu().si(0, g_slotBitWidth),
-                     m_ctx.alu().si(1, g_slotBitWidth));
+    return strct::mk(rawPtr, m_ctx.alu().ui(0, g_slotBitWidth),
+                     m_ctx.alu().ui(1, g_slotBitWidth));
   }
 
   /// \brief Converts a raw ptr to fat ptr with default value for fat
@@ -571,13 +574,19 @@ public:
     LOG("opsem", WARN << "isDereferenceable() not implemented!\n");
     return m_ctx.alu().getFalse();
   }
+
+  RawPtrTy getAddressable(FatPtrTy p) const { return mkRawPtr(p); }
+
+  bool isPtrTyVal(Expr e) const {
+    // struct with raw ptr + fat slots
+    return strct::isStructVal(e) && e->arity() <= (1 + g_maxFatSlots);
+  }
 };
 
 FatMemManager::FatMemManager(Bv2OpSem &sem, Bv2OpSemContext &ctx,
                              unsigned ptrSz, unsigned wordSz, bool useLambdas)
-    : OpSemMemManagerBase(
-          sem, ctx, ptrSz, wordSz,
-          false /* this is a nop since we delegate to RawMemMgr */),
+    : MemManagerCore(sem, ctx, ptrSz, wordSz,
+                     false /* this is a nop since we delegate to RawMemMgr */),
       m_main(sem, ctx, ptrSz, wordSz, useLambdas),
       m_nullPtr(mkFatPtr(m_main.nullPtr())),
       m_slot0(sem, ctx, ptrSz, g_slotByteWidth, useLambdas),

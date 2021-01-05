@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BvOpSem2Context.hh"
+#include "BvOpSem2MemManagerMixin.hh"
 #include "BvOpSem2RawMemMgr.hh"
 
 #include "seahorn/Expr/ExprOpStruct.hh"
@@ -20,18 +21,16 @@ namespace details {
 // Currently this implementation has a metadata memory word size of 1 byte.
 // For every byte written to conventional memory, we set the corresponding
 // metadata memory address to value 1.
-class TrackingRawMemManager : public OpSemMemManagerBase {
+class TrackingRawMemManager : public MemManagerCore {
 private:
   RawMemManager m_main;
   RawMemManager m_metadata;
 
-  static const unsigned int g_MetadataBitWidth = 8;
-  static const unsigned int g_MetadataByteWidth = g_MetadataBitWidth / 8;
-  static const unsigned int g_num_slots = 2;
-
 public:
   // This memory manager supports tracking
   using TrackingTag = MemoryFeatures::Tracking_tag;
+  using FatMemTag = int;
+
   using PtrTy = OpSemMemManager::PtrTy;
   using PtrSortTy = OpSemMemManager::PtrSortTy;
   using MemRegTy = OpSemMemManager::MemRegTy;
@@ -58,7 +57,6 @@ public:
       assert(strct::isStructVal(e));
       assert(!strct::isStructVal(e->arg(0)));
       assert(!strct::isStructVal(e->arg(1)));
-      assert(e->arity() == g_num_slots);
       m_v = e;
     }
 
@@ -205,6 +203,16 @@ public:
   Expr ptrtoint(PtrTy ptr, const Type &ptrTy, const Type &intTy) const;
 
   Expr ptrEq(PtrTy p1, PtrTy p2) const;
+  Expr ptrUlt(PtrTy p1, PtrTy p2) const;
+  Expr ptrSlt(PtrTy p1, PtrTy p2) const;
+  Expr ptrUle(PtrTy p1, PtrTy p2) const;
+  Expr ptrSle(PtrTy p1, PtrTy p2) const;
+  Expr ptrUgt(PtrTy p1, PtrTy p2) const;
+  Expr ptrSgt(PtrTy p1, PtrTy p2) const;
+  Expr ptrUge(PtrTy p1, PtrTy p2) const;
+  Expr ptrSge(PtrTy p1, PtrTy p2) const;
+  Expr ptrNe(PtrTy p1, PtrTy p2) const;
+  Expr ptrSub(PtrTy p1, PtrTy p2) const;
 
   PtrTy gep(PtrTy ptr, gep_type_iterator it, gep_type_iterator end) const;
   void onFunctionEntry(const Function &fn);
@@ -220,6 +228,8 @@ public:
   Expr isDereferenceable(PtrTy p, Expr byteSz);
 
   PtrTy getAddressable(PtrTy p) const;
+
+  bool isPtrTyVal(Expr e) const;
 
   Expr isModified(PtrTy p, MemValTy mem);
 

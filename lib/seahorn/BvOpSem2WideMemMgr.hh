@@ -1,15 +1,13 @@
 #pragma once
 
 #include "BvOpSem2Context.hh"
+#include "BvOpSem2MemManagerMixin.hh"
 #include "BvOpSem2RawMemMgr.hh"
 
 namespace seahorn {
 namespace details {
 
-class WideMemManager : public OpSemMemManagerBase {
-
-  /// \brief Knows the memory representation and how to access it
-  std::unique_ptr<OpSemMemRepr> m_memRepr;
+class WideMemManager : public MemManagerCore {
 
   /// \brief Base name for non-deterministic pointer
   Expr m_freshPtrName;
@@ -27,15 +25,11 @@ class WideMemManager : public OpSemMemManagerBase {
   RawMemManager m_main;
   RawMemManager m_size;
 
-  static const unsigned int g_slotBitWidth = 64;
-  static const unsigned int g_slotByteWidth = g_slotBitWidth / 8;
-
-  static const unsigned int g_uninit = 0xDEADBEEF;
-  static const unsigned int g_num_slots = 2;
-
 public:
   // setting TrackingTag to int disqualifies this class as having tracking
   using TrackingTag = int;
+  using FatMemTag = int;
+
   using RawPtrTy = OpSemMemManager::PtrTy;
   using RawMemValTy = OpSemMemManager::MemValTy;
   using RawPtrSortTy = OpSemMemManager::PtrSortTy;
@@ -57,7 +51,6 @@ public:
     explicit PtrTyImpl(const Expr &e) {
       // Our ptr is a struct of two exprs
       assert(strct::isStructVal(e));
-      assert(e->arity() == g_num_slots);
       m_v = e;
     }
 
@@ -84,7 +77,6 @@ public:
     explicit MemValTyImpl(const Expr &e) {
       // Our ptr is a struct of two exprs
       assert(strct::isStructVal(e));
-      assert(e->arity() == g_num_slots);
       m_v = e;
     }
 
@@ -230,6 +222,16 @@ public:
 
   /// \brief Checks if two pointers are equal considering only the raw part.
   Expr ptrEq(PtrTy p1, PtrTy p2) const;
+  Expr ptrUlt(PtrTy p1, PtrTy p2) const;
+  Expr ptrSlt(PtrTy p1, PtrTy p2) const;
+  Expr ptrUle(PtrTy p1, PtrTy p2) const;
+  Expr ptrSle(PtrTy p1, PtrTy p2) const;
+  Expr ptrUgt(PtrTy p1, PtrTy p2) const;
+  Expr ptrSgt(PtrTy p1, PtrTy p2) const;
+  Expr ptrUge(PtrTy p1, PtrTy p2) const;
+  Expr ptrSge(PtrTy p1, PtrTy p2) const;
+  Expr ptrNe(PtrTy p1, PtrTy p2) const;
+  Expr ptrSub(PtrTy p1, PtrTy p2) const;
 
   PtrTy gep(PtrTy ptr, gep_type_iterator it, gep_type_iterator end) const;
 
@@ -247,6 +249,8 @@ public:
   Expr isDereferenceable(PtrTy p, Expr byteSz);
 
   RawPtrTy getAddressable(PtrTy p) const;
+
+  bool isPtrTyVal(Expr e) const;
 
   Expr getSize(PtrTy p);
 

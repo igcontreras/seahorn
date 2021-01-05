@@ -129,6 +129,10 @@ static llvm::cl::opt<bool> UseIncVacSat(
         "Use incremental solver to check for vacuity and assertions"),
     llvm::cl::init(false));
 
+static llvm::cl::opt<unsigned>
+    MaxSizeGlobalVarInit("horn-bv2-max-gv-init-size",
+                         llvm::cl::desc("Maximum size for global initializers"),
+                         llvm::cl::init(0));
 namespace {
 
 const Value *extractUniqueScalar(CallSite &cs) {
@@ -271,6 +275,23 @@ struct OpSemVisitorBase {
     }
   }
 };
+
+static bool
+clobbersFlagRegisters(const llvm::SmallVector<llvm::StringRef, 4> &AsmPieces) {
+
+  if (AsmPieces.size() == 3 || AsmPieces.size() == 4) {
+    if (std::count(AsmPieces.begin(), AsmPieces.end(), "~{cc}") &&
+        std::count(AsmPieces.begin(), AsmPieces.end(), "~{flags}") &&
+        std::count(AsmPieces.begin(), AsmPieces.end(), "~{fpsr}")) {
+
+      if (AsmPieces.size() == 3)
+        return true;
+      else if (std::count(AsmPieces.begin(), AsmPieces.end(), "~{dirflag}"))
+        return true;
+    }
+  }
+  return false;
+}
 
 class OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemVisitorBase {
 public:
@@ -548,6 +569,12 @@ public:
         visitIsModified(CS);
       } else if (f->getName().startswith("sea.reset_modified")) {
         visitResetModified(CS);
+      } else if (f->getName().startswith("sea.reset_modified")) {
+        visitResetModified(CS);
+      } else if (f->getName().startswith("sea.tracking_on")) {
+        visitSetTrackingOn(CS);
+      } else if (f->getName().startswith(("sea.tracking_off"))) {
+        visitSetTrackingOff(CS);
       } else if (f->getName().startswith(("sea.assert.if"))) {
         visitSeaAssertIfCall(CS);
       } else if (f->getName().startswith(("verifier.assert"))) {
@@ -600,33 +627,82 @@ public:
   void visitInlineAsmCall(CallSite CS) {
     // We only care about handling simple cases e.g. which are used to
     // thwart optimization by obfuscating code.
-    // Specifically, we ONLY handle the following kinds of inline assembly:
-    // 1) %_57 = call i64 asm sideeffect "",
+    // Inline assembly format:
+    // a string contains instructions, a list of operand constraints, (flags,
+    // e.g. sideeffect) Specifically, we ONLY handle the following kinds of
+    // inline assembly: 1) %_57 = call i64 asm sideeffect "",
     // "=r,0,~{dirflag},~{fpsr},~{flags}"(i64 %_14) #7, !dbg !504, !srcloc !505
     // @ _55 in main
     // 2) call void asm sideeffect "",
     // "r,~{memory},~{dirflag},~{fpsr},~{flags}"(i8* %7) #5, !dbg !102, !srcloc
     // !103
+    // 3) Single instruction of bswap asm
 
-    InlineAsm *IA = cast<InlineAsm>(CS.getCalledValue());
-    const std::string &AsmStr = IA->getAsmString();
-    // only handle "" instruction template and one argument
-    if (!AsmStr.empty() || CS.getNumArgOperands() > 1) {
+    IntegerType *Ty =
+        dyn_cast<IntegerType>(cast<CallInst>(CS.getInstruction())->getType());
+    if (!Ty || Ty->getBitWidth() % 16 != 0 || CS.getNumArgOperands() > 1) {
       LOG("opsem",
           ERR << "Cannot handle inline assembly: " << *CS.getInstruction());
       return;
     }
-
-    if (IA->getConstraintString().compare(0, 5, "=r,0,") == 0) {
-      // copy input to output
-      Expr readVal = lookup(*CS.getArgument(0));
-      setValue(*CS.getInstruction(), readVal);
-    } else if (IA->getConstraintString().compare(0, 2, "r,") == 0) {
-      // This code is only used to stop optimization
-      // Since there is no computation, do nothing
-    } else {
+    InlineAsm *IA = cast<InlineAsm>(CS.getCalledValue());
+    const std::string &AsmStr = IA->getAsmString();
+    llvm::SmallVector<llvm::StringRef, 4> AsmPieces;
+    llvm::SplitString(AsmStr, AsmPieces, ";\n");
+    switch (AsmPieces.size()) {
+    default:
       LOG("opsem",
           ERR << "Cannot handle inline assembly: " << *CS.getInstruction());
+      break;
+    case 0:
+      if (IA->getConstraintString().compare(0, 5, "=r,0,") == 0) {
+        // Copy input to output
+        Expr readVal = lookup(*CS.getArgument(0));
+        setValue(*CS.getInstruction(), readVal);
+      } else if (IA->getConstraintString().compare(0, 2, "r,") == 0) {
+        // This code is only used to stop optimization
+        // Since there is no computation, do nothing
+      } else {
+        LOG("opsem",
+            ERR << "Cannot handle inline assembly: " << *CS.getInstruction());
+      }
+      break;
+    case 1:
+      bool isAsmHandled = false;
+      // bswap
+      if (AsmStr.compare(0, 8, "bswap $0") == 0 ||
+          AsmStr.compare(0, 9, "bswapl $0") == 0 ||
+          AsmStr.compare(0, 9, "bswapq $0") == 0 ||
+          AsmStr.compare(0, 12, "bswap ${0:q}") == 0 ||
+          AsmStr.compare(0, 13, "bswapl ${0:q}") == 0 ||
+          AsmStr.compare(0, 13, "bswapq ${0:q}") == 0) {
+        // No need to check constraints
+        isAsmHandled = expandCallInst(
+            *cast<CallInst>(CS.getInstruction()), [](CallInst &CI) {
+              return IntrinsicLowering::LowerToByteSwap(&CI);
+            });
+      }
+      // llvm.bswap.i16
+      if (cast<CallInst>(CS.getInstruction())->getType()->isIntegerTy(16) &&
+          IA->getConstraintString().compare(0, 5, "=r,0,") == 0 &&
+          (AsmStr.compare(0, 16, "rorw $$8, ${0:w}") == 0 ||
+           AsmStr.compare(0, 16, "rolw $$8, ${0:w}") == 0)) {
+        // Check Flag resgisters
+        AsmPieces.clear();
+        llvm::SplitString(StringRef(IA->getConstraintString()).substr(5),
+                          AsmPieces, ",");
+        // Try to replace a call instruction with a call to a bswap intrinsic
+        isAsmHandled =
+            clobbersFlagRegisters(AsmPieces) &&
+            expandCallInst(*cast<CallInst>(CS.getInstruction()),
+                           [](CallInst &CI) {
+                             return IntrinsicLowering::LowerToByteSwap(&CI);
+                           });
+      }
+      if (!isAsmHandled)
+        LOG("opsem", ERR << "Cannot handle inline assembly of integer swap: "
+                         << *CS.getInstruction());
+      break;
     }
   }
 
@@ -672,6 +748,10 @@ public:
     m_ctx.setMemReadRegister(Expr());
     m_ctx.setMemWriteRegister(Expr());
   }
+
+  void visitSetTrackingOn(CallSite CS) { m_ctx.setTracking(true); }
+
+  void visitSetTrackingOff(CallSite CS) { m_ctx.setTracking(false); }
 
   /// Report outcome of vacuity and incremental assertion checking
   void reportDoAssert(char *tag, const Instruction &I, boost::tribool res,
@@ -984,12 +1064,13 @@ public:
       Value *gVal = (*CS.getArgument(2)).stripPointerCasts();
       if (auto *gv = dyn_cast<llvm::GlobalVariable>(gVal)) {
         auto gvVal = m_ctx.getGlobalVariableInitValue(*gv);
-        if (gvVal.first) {
+        if (gvVal.first && (MaxSizeGlobalVarInit == 0 ||
+                            gvVal.second <= MaxSizeGlobalVarInit)) {
           m_ctx.MemFill(lookup(*gv), gvVal.first, gvVal.second);
+        } else {
+          WARN << "skipping global var init of " << inst << " to " << *gVal
+               << "\n";
         }
-      } else {
-        WARN << "skipping global var init of " << inst << " to " << *gVal
-             << "\n";
       }
       return;
     }
@@ -1132,6 +1213,62 @@ public:
     m_ctx.pushParameter(falseE);
   }
 
+  bool expandCallInst(CallInst &I,
+                      std::function<bool(CallInst &)> InstExpandFn) {
+    // -- The code is tricky because we must update
+    // -- (a) instruction iterator inside m_ctx to point to newly expanded
+    // --     instruction
+    // -- (b) COI filter to include new instructions if they came from marked
+    // instruction
+
+    // -- remember if the current instruction is in the COI (cone of
+    // -- influence). filter. If it is, we need to mark expanded instructions
+    // -- to be in the cone as well
+    bool isInFilter = m_sem.isInFilter(I);
+    // -- get an iterator to the current instruction so that we can access
+    // -- prev and next instructions
+    BasicBlock::iterator me(&I);
+
+    // -- remember the following instruction
+    auto nextInst = me;
+    // -- advance iterator to point to the next instruction from I
+    ++nextInst;
+
+    // -- check whether the current instruction is the first instruction of
+    // -- the basic block and has no predecessor
+    BasicBlock *bb = I.getParent();
+    bool atBegin(bb->begin() == me);
+
+    // -- if I is not the first instruction, make `me` point to the
+    // predecessor of I
+    if (!atBegin)
+      --me;
+
+    // -- expand I by lowering it into 0 or more other instructions
+    if (!InstExpandFn(I))
+      // -- return if expansion has failed
+      return false;
+
+    // -- restore instruction pointer to the new lowered instructions
+    // -- the instruction pointer is either the first instruction of the basic
+    // -- block or the instruction currently following `me`
+    auto top = atBegin ? &*bb->begin() : &*(++me);
+    // -- tell context that next instruction to execute is top, and that
+    // -- execution of current instruction must be repeated (because the
+    // -- current instruction has changed)
+    m_ctx.setInstruction(*top, true);
+
+    // -- update COI filter. New instructions introduced by lowering, if any,
+    // -- are the instructions between current top, and whatever instruction
+    // -- was following I
+    if (isInFilter) {
+      for (auto it = BasicBlock::iterator(top); it != nextInst; ++it) {
+        m_sem.addToFilter(*it);
+      }
+    }
+    return true;
+  }
+
   void visitIntrinsicInst(IntrinsicInst &I) {
     switch (I.getIntrinsicID()) {
     case Intrinsic::bswap:
@@ -1158,34 +1295,12 @@ public:
     case Intrinsic::lifetime_start:
     case Intrinsic::lifetime_end: {
       // -- use existing LLVM codegen to lower intrinsics into simpler
-      // instructions that we support
-
-      bool isInFilter = m_sem.isInFilter(I);
-      BasicBlock::iterator me(&I);
-      // -- remember the following instruction
-      auto nextInst = me;
-      ++nextInst;
-
-      auto *parent = I.getParent();
-      bool atBegin(parent->begin() == me);
-      // -- save instruction before the one being lowered
-      if (!atBegin)
-        --me;
-      IntrinsicLowering IL(m_sem.getDataLayout());
-      IL.LowerIntrinsicCall(&I);
-
-      // -- restore instruction pointer to the new lowered instructions
-      auto top = atBegin ? &*parent->begin() : &*(++me);
-      m_ctx.setInstruction(*top);
-      m_ctx.setInstruction(*top, true);
-
-      // -- add newly inserted instructions to COI, if I was in COI
-      if (isInFilter) {
-        for (auto it = BasicBlock::iterator(top); it != nextInst; ++it) {
-          m_sem.addToFilter(*it);
-        }
-      }
-
+      // -- instructions that we support
+      expandCallInst(I, [&m_sem = m_sem](CallInst &II) {
+        IntrinsicLowering IL(m_sem.getDataLayout());
+        IL.LowerIntrinsicCall(&II);
+        return true;
+      });
     } break;
     case Intrinsic::sadd_with_overflow: {
       Type *ty = I.getOperand(0)->getType();
@@ -1240,7 +1355,11 @@ public:
       Expr isNoOverflow =
           m_ctx.alu().IsUaddNoOverflow(op0, op1, ty->getScalarSizeInBits());
       assert(addRes && isNoOverflow);
-      Expr maxVal = m_ctx.alu().si(~0UL, ty->getScalarSizeInBits());
+      mpz_class maxValZ;
+      for (unsigned i = 0; i < ty->getScalarSizeInBits(); ++i) {
+        maxValZ.setbit(i);
+      }
+      Expr maxVal = m_ctx.alu().num(maxValZ, ty->getScalarSizeInBits());
       Expr res = boolop::lite(isNoOverflow, addRes, maxVal);
       setValue(I, res);
     } break;
@@ -1361,7 +1480,7 @@ public:
                                           unsigned opResultBitWidth,
                                           unsigned carryBitPadwidth) {
     Expr carry = m_ctx.alu().Concat(
-        {m_ctx.alu().si(0U, carryBitPadwidth), carryBitPadwidth},
+        {m_ctx.alu().ui(0U, carryBitPadwidth), carryBitPadwidth},
         {carryBit, 1});
     return m_ctx.alu().Concat({carry, carryBitPadwidth},
                               {opResult, opResultBitWidth});
@@ -2420,14 +2539,14 @@ Expr Bv2OpSemContext::getConstantValue(const llvm::Constant &c) {
     return mem().nullPtr();
   } else if (const ConstantInt *ci = dyn_cast<const ConstantInt>(&c)) {
     if (ci->getType()->isIntegerTy(1))
-      return ci->isOne() ? alu().si(1U, 1) : alu().si(0U, 1);
+      return ci->isOne() ? alu().ui(1U, 1) : alu().ui(0U, 1);
     else if (ci->isZero())
-      return alu().si(0U, m_sem.sizeInBits(c));
+      return alu().ui(0U, m_sem.sizeInBits(c));
     else if (ci->isOne())
-      return alu().si(1U, m_sem.sizeInBits(c));
+      return alu().ui(1U, m_sem.sizeInBits(c));
 
     expr::mpz_class k = toMpz(ci->getValue());
-    return alu().si(k, m_sem.sizeInBits(c));
+    return alu().num(k, m_sem.sizeInBits(c));
   }
 
   if (c.getType()->isIntegerTy()) {
@@ -2436,7 +2555,7 @@ Expr Bv2OpSemContext::getConstantValue(const llvm::Constant &c) {
     if (GVO.hasValue()) {
       GenericValue gv = GVO.getValue();
       expr::mpz_class k = toMpz(gv.IntVal);
-      return alu().si(k, m_sem.sizeInBits(c));
+      return alu().num(k, m_sem.sizeInBits(c));
     }
   } else if (c.getType()->isStructTy()) {
     ConstantExprEvaluator ce(m_sem.getDataLayout());
@@ -2449,7 +2568,7 @@ Expr Bv2OpSemContext::getConstantValue(const llvm::Constant &c) {
         if (aggBvO.hasValue()) {
           const APInt &aggBv = aggBvO.getValue();
           expr::mpz_class k = toMpz(aggBv);
-          return alu().si(k, aggBv.getBitWidth());
+          return alu().num(k, aggBv.getBitWidth());
         }
       }
     }
@@ -2481,6 +2600,8 @@ void Bv2OpSemContext::addToSolver(const Expr e) {
 }
 
 boost::tribool Bv2OpSemContext::solve() { return m_z3_solver->solve(); }
+
+Expr Bv2OpSemContext::ptrToAddr(Expr p) { return mem().ptrToAddr(p); }
 
 } // namespace details
 

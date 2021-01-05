@@ -1,3 +1,4 @@
+#include "BvOpSem2Allocators.hh"
 #include "BvOpSem2Context.hh"
 
 #include "llvm/IR/GetElementPtrTypeIterator.h"
@@ -66,13 +67,13 @@ struct OpSemAllocator::GlobalAllocInfo {
                   unsigned sz)
       : m_gv(&gv), m_start(start), m_end(end), m_sz(sz) {
 
-    m_mem = static_cast<char *>(::operator new(sz));
+    m_mem = static_cast<char *>(::operator new(end - start));
   }
 
   char *getMemory() const { return m_mem; }
 };
 
-OpSemAllocator::OpSemAllocator(OpSemMemManager &mem, unsigned maxSymbAllocSz)
+OpSemAllocator::OpSemAllocator(RawMemManagerCore &mem, unsigned maxSymbAllocSz)
     : m_mem(mem), m_ctx(mem.ctx()), m_sem(mem.sem()),
       m_efac(m_ctx.getExprFactory()), m_maxSymbAllocSz(maxSymbAllocSz) {}
 
@@ -181,7 +182,7 @@ void OpSemAllocator::dumpGlobalsMap() {
 
 class NormalOpSemAllocator : public OpSemAllocator {
 public:
-  NormalOpSemAllocator(OpSemMemManager &mem, unsigned maxSymbAllocSz)
+  NormalOpSemAllocator(RawMemManagerCore &mem, unsigned maxSymbAllocSz)
       : OpSemAllocator(mem, maxSymbAllocSz) {}
   ~NormalOpSemAllocator() = default;
 
@@ -203,9 +204,9 @@ public:
 
   AddrInterval salloc(Expr bytes, uint32_t align) override {
     auto addrIvl = this->salloc(m_maxSymbAllocSz, align);
-    auto width = m_mem.ptrSzInBits();
+    auto width = m_mem.ptrSizeInBits();
     Expr inRange = m_ctx.alu().doUle(
-        bytes, m_ctx.alu().si(m_maxSymbAllocSz, width), width);
+        bytes, m_ctx.alu().ui(m_maxSymbAllocSz, width), width);
     m_ctx.addScopedRely(inRange);
     return addrIvl;
   }
@@ -221,7 +222,7 @@ public:
 /// unsoundness depending on the use / expectations. Use with caution
 class StaticOpSemAllocator : public OpSemAllocator {
 public:
-  StaticOpSemAllocator(OpSemMemManager &mem, unsigned maxSymbAllocSz)
+  StaticOpSemAllocator(RawMemManagerCore &mem, unsigned maxSymbAllocSz)
       : OpSemAllocator(mem, maxSymbAllocSz) {}
 
   void onModuleEntry(const Module &M) override {
@@ -322,9 +323,9 @@ public:
     if (auto *alloca = dyn_cast<llvm::AllocaInst>(&m_ctx.getCurrentInst())) {
       for (auto &ai : m_allocas) {
         if (ai.m_inst == alloca) {
-          auto width = m_mem.ptrSzInBits();
+          auto width = m_mem.ptrSizeInBits();
           Expr inRange = m_ctx.alu().doUle(
-              bytes, m_ctx.alu().si(m_maxSymbAllocSz, width), width);
+              bytes, m_ctx.alu().ui(m_maxSymbAllocSz, width), width);
           LOG("opsem", errs()
                            << "Adding range condition: " << *inRange << "\n";);
           m_ctx.addScopedRely(inRange);
@@ -336,11 +337,11 @@ public:
   }
 };
 std::unique_ptr<OpSemAllocator>
-mkNormalOpSemAllocator(OpSemMemManager &mem, unsigned maxSymbAllocSz) {
+mkNormalOpSemAllocator(RawMemManagerCore &mem, unsigned maxSymbAllocSz) {
   return std::make_unique<NormalOpSemAllocator>(mem, maxSymbAllocSz);
 }
 std::unique_ptr<OpSemAllocator>
-mkStaticOpSemAllocator(OpSemMemManager &mem, unsigned maxSymbAllocSz) {
+mkStaticOpSemAllocator(RawMemManagerCore &mem, unsigned maxSymbAllocSz) {
   return std::make_unique<StaticOpSemAllocator>(mem, maxSymbAllocSz);
 }
 

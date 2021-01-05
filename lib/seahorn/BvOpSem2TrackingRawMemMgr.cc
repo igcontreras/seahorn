@@ -3,13 +3,16 @@
 namespace seahorn {
 namespace details {
 
+static const unsigned int g_MetadataBitWidth = 8;
+static const unsigned int g_MetadataByteWidth = g_MetadataBitWidth / 8;
+static const unsigned int g_num_slots = 2;
+
 TrackingRawMemManager::TrackingRawMemManager(Bv2OpSem &sem,
                                              Bv2OpSemContext &ctx,
                                              unsigned ptrSz, unsigned wordSz,
                                              bool useLambdas)
-    : OpSemMemManagerBase(
-          sem, ctx, ptrSz, wordSz,
-          false /* this is a nop since we delegate to RawMemMgr */),
+    : MemManagerCore(sem, ctx, ptrSz, wordSz,
+                     false /* this is a nop since we delegate to RawMemMgr */),
       m_main(sem, ctx, ptrSz, wordSz, useLambdas),
       m_metadata(sem, ctx, ptrSz, g_MetadataByteWidth, useLambdas, true) {}
 
@@ -18,15 +21,20 @@ TrackingRawMemManager::TrackingRawMemManager(Bv2OpSem &sem,
                                              unsigned ptrSz, unsigned wordSz,
                                              bool useLambdas,
                                              bool ignoreAlignment)
-    : OpSemMemManagerBase(
-          sem, ctx, ptrSz, wordSz,
-          false /* this is a nop since we delegate to RawMemMgr */),
+    : MemManagerCore(sem, ctx, ptrSz, wordSz,
+                     false /* this is a nop since we delegate to RawMemMgr */),
       m_main(sem, ctx, ptrSz, wordSz, useLambdas, ignoreAlignment),
       m_metadata(sem, ctx, ptrSz, g_MetadataByteWidth, useLambdas, true) {}
 TrackingRawMemManager::PtrTy
 TrackingRawMemManager::getAddressable(TrackingRawMemManager::PtrTy p) const {
   return p;
 }
+
+bool TrackingRawMemManager::isPtrTyVal(Expr e) const {
+  // same PtrTy as RawMemManager
+  return !e || !strct::isStructVal(e);
+}
+
 Expr TrackingRawMemManager::isDereferenceable(TrackingRawMemManager::PtrTy p,
                                               Expr byteSz) {
   // isDereferenceable should never be called in a 'RawMemMgr'
@@ -107,8 +115,8 @@ TrackingRawMemManager::MemValTy TrackingRawMemManager::storeValueToMem(
   ExprFactory &efac = ptr->efac();
   // TODO: use zeroed memory on m_main, m_metadata instead of explicit
   // init
-  MemValTy res(m_ctx.alu().si(0UL, wordSzInBits()),
-               m_ctx.alu().si(0UL, g_MetadataBitWidth));
+  MemValTy res(m_ctx.alu().ui(0UL, wordSizeInBits()),
+               m_ctx.alu().ui(0UL, g_MetadataBitWidth));
   switch (ty.getTypeID()) {
   case Type::IntegerTyID:
     if (ty.getScalarSizeInBits() < byteSz * 8) {
@@ -211,7 +219,7 @@ TrackingRawMemManager::memsetMetaData(PtrTy ptr, Expr len, MemValTy memIn,
   assert(llvm::Log2_64(val) + 1 <= g_MetadataBitWidth);
   return MemValTy(
       memIn.getRaw(),
-      m_metadata.MemSet(ptr, m_ctx.alu().si(val, g_MetadataBitWidth), len,
+      m_metadata.MemSet(ptr, m_ctx.alu().ui(val, g_MetadataBitWidth), len,
                         memIn.getMetadata(), m_metadata.wordSzInBytes()));
 }
 TrackingRawMemManager::MemValTy
@@ -221,7 +229,7 @@ TrackingRawMemManager::memsetMetaData(PtrTy ptr, unsigned int len,
   assert(llvm::Log2_64(val) + 1 <= g_MetadataBitWidth);
   return MemValTy(
       memIn.getRaw(),
-      m_metadata.MemSet(ptr, m_ctx.alu().si(val, g_MetadataBitWidth), len,
+      m_metadata.MemSet(ptr, m_ctx.alu().ui(val, g_MetadataBitWidth), len,
                         memIn.getMetadata(), m_metadata.wordSzInBytes()));
 }
 Expr TrackingRawMemManager::getMetaData(PtrTy ptr, MemValTy memIn,
@@ -246,7 +254,9 @@ Expr TrackingRawMemManager::coerce(Expr sort, Expr val) {
     assert(sort->arity() == val->arity());
     assert(sort->arity() == g_num_slots);
     kids.push_back(m_main.coerce(sort->arg(0), val->arg(0)));
-    kids.push_back(m_metadata.coerce(sort->arg(1), val->arg(1)));
+    // when havocing a value; don't havoc(ignore) value for metadata memory,
+    // instead use 'zeroed' memory.
+    kids.push_back(m_metadata.zeroedMemory());
     return strct::mk(kids);
   }
   return m_main.coerce(sort, val);
@@ -328,6 +338,46 @@ TrackingRawMemManager::resetModified(TrackingRawMemManager::PtrTy p,
                                      TrackingRawMemManager::MemValTy mem) {
   LOG("opsem", WARN << "resetModified() not implemented!\n");
   return mem;
+}
+Expr TrackingRawMemManager::ptrUlt(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrUlt(getAddressable(p1), getAddressable(p2));
+}
+Expr TrackingRawMemManager::ptrSlt(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrSlt(getAddressable(p1), getAddressable(p2));
+}
+Expr TrackingRawMemManager::ptrUle(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrUle(getAddressable(p1), getAddressable(p2));
+}
+Expr TrackingRawMemManager::ptrSle(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrSle(getAddressable(p1), getAddressable(p2));
+}
+Expr TrackingRawMemManager::ptrUgt(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrUgt(getAddressable(p1), getAddressable(p2));
+}
+Expr TrackingRawMemManager::ptrSgt(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrSgt(getAddressable(p1), getAddressable(p2));
+}
+Expr TrackingRawMemManager::ptrUge(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrUge(getAddressable(p1), getAddressable(p2));
+}
+Expr TrackingRawMemManager::ptrSge(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return expr::Expr();
+}
+Expr TrackingRawMemManager::ptrNe(TrackingRawMemManager::PtrTy p1,
+                                  TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrNe(getAddressable(p1), getAddressable(p2));
+}
+Expr TrackingRawMemManager::ptrSub(TrackingRawMemManager::PtrTy p1,
+                                   TrackingRawMemManager::PtrTy p2) const {
+  return m_main.ptrSub(getAddressable(p1), getAddressable(p2));
 }
 } // namespace details
 } // namespace seahorn
