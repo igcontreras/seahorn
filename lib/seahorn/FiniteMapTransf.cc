@@ -76,15 +76,8 @@ static Expr mkFappArgsCore(Expr fapp, Expr newFdecl, ExprVector &extraUnifs,
                   sort::finiteMapValTy(argTy), nArg_it, extraUnifs, evars);
         // new arguments are added to `newArgs` in the function above
       } else {
-        Expr fmd;
-        if (finite_map::isFmapVal(arg))
-          fmd = arg;
-        else if (isOpX<ITE>(arg))
-          fmd = fmap_transf::mkIteCore(arg->left(), arg->right(), arg->last());
-        else if (isOpX<SET>(arg)) // TODO: it should never happen?
-          fmd = fmap_transf::mkSetCore(arg->left(), arg->right(), arg->last());
+        Expr fmd = fmap_transf::mkExpandCore(arg);
 
-        assert(finite_map::isFmapVal(fmd));
         if (nKs == 1)
           *nArg_it++ = finite_map::fmapDefValues(fmd)->first();
         else {
@@ -861,7 +854,7 @@ public:
   }
 };
 
-Expr mkInlineDefs(Expr def, ExprMap defsmap) {
+Expr mkInlineDefs(Expr def, ExprMap &defsmap) {
   DefVisitor dv(defsmap);
   DagVisitCache cache;
   Expr newE = visit(dv, def, cache);
@@ -877,6 +870,22 @@ void insertVarsDef(Expr fmd, ExprSet &vars) {
   for (auto v_it = vs->begin(); v_it != vs->end(); v_it++)
     vars.insert(*v_it);
 }
+
+Expr mkExpandCore(Expr fm) {
+  Expr fmd;
+
+  if (finite_map::isFmapVal(fm))
+    fmd = fm;
+  else if (isOpX<ITE>(fm))
+    fmd = fmap_transf::mkIteCore(fm->left(), fm->right(), fm->last());
+  else if (isOpX<SET>(fm))
+    fmd = fmap_transf::mkSetCore(fm->left(), fm->right(), fm->last());
+
+  assert(finite_map::isFmapVal(fmd));
+  return fmd;
+}
+
 } // namespace fmap_transf
+
 
 } // namespace seahorn

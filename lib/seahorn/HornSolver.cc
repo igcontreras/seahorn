@@ -327,7 +327,7 @@ void HornSolver::printInvars(Function &F, HornDbModel &model) {
     // Expr invars = fp.getCoverDelta (bind::fapp (bbPred, live));
     Expr bbfapp = bind::fapp(bbPred, live);
     Expr invars = InterProcMemFmaps ? processFmaps(bbfapp, model)
-                                    : invars = model.getDef(bbfapp);
+                                    : model.getDef(bbfapp);
 
     if (isOpX<AND>(invars)) {
       outs() << "\n";

@@ -1893,8 +1893,31 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
     }
   }
 
-  ExprVector arrayStores; // copies are not directly added to `side` because we
-                          // want them to be active only if the function is
+  bool isTrueActiveLit = isOpX<TRUE>(csi.m_fparams[0]); // active literal
+  ExprVector
+          arrayStores; // copies are not directly added to `side` because we
+                       // want them to be active only if the function is
+
+  // -- processes the arguments that require extra stores. The stores are
+  // -- protected by the active literal so that they are not used by the solver
+  // -- if the function is not active. If the active literal is true, the
+  // -- SymStore is updated instead
+  auto addStore =
+      [&](const Expr lhs, const Expr rhs, const Value *v) {
+        if (OpSemVisitor::returnsArray(lhs))
+          arrayStores.push_back(mk<EQ>(lhs, rhs));
+        else if (isTrueActiveLit)
+          s.write(symb(*v), rhs);
+        else {
+          assert(finite_map::returnsFiniteMap(rhs));
+          Expr rhsv = finite_map::fmapDefValues(finite_map::mkExpand(rhs));
+          Expr lhsv = finite_map::fmapDefValues(lhs);
+          auto la_it = lhsv->begin();
+          for (auto ra_it = rhsv->begin(); ra_it != rhsv->end() ; ra_it++, la_it++)
+            arrayStores.push_back(mk<EQ>(*la_it, *ra_it));
+          assert(la_it == lhsv->end());
+        }
+      };
 
   // add definitions in an ordered way
   ExprMap extraDefs;
@@ -1951,25 +1974,19 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
         if (m_fmOut.count(param) > 0) {
           // there may not be fmOut if nodes are split
           Expr extra = fmap_transf::mkInlineDefs(m_fmOut[param], extraDefs);
-          if (finite_map::returnsFiniteMap(extra))
-            s.write(symb(**v_it), extra);
-          else
-            arrayStores.push_back(mk<EQ>(param, extra));
+          addStore(param, extra, *v_it);
         }
       }
     } else if (m_cellReplaceOut.count(pair) > 0) { // output param
       Expr cellE = m_cellReplaceOut[pair];
       csi.m_fparams[i] = extraDefs[cellE];
+      LOG("fmap_param", errs() << " [OUT] replaced " << *param
+          << " by: " << *csi.m_fparams[i] << "\n";);
       if (m_fmOut.count(param) > 0) {
         // there may not be fmOut if nodes are split
         Expr extra = fmap_transf::mkInlineDefs(m_fmOut[param], extraDefs);
-        if (finite_map::returnsFiniteMap(extra))
-          s.write(symb(**v_it), extra);
-        else
-          arrayStores.push_back(mk<EQ>(param, extra));
+        addStore(param, extra, *v_it);
       }
-      LOG("fmap_param",
-          errs() << " [OUT] replaced " << *csi.m_fparams[i] << " by: ";);
     } else if ((finite_map::returnsFiniteMap(param) &&
                 isOpX<ARRAY_TY>(fi.sumPred->arg(i + 1)))
                // -- the memory region does not exist in the bu graph of the
@@ -1993,10 +2010,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       if (nOut->isRead() && nOut->isModified()) {
         // -- add memOut = memIn (not accessed in this function)
         Expr nextParam = csi.m_fparams[i + 1];
-        if (OpSemVisitor::returnsArray(nextParam))
-          arrayStores.push_back(mk<EQ>(nextParam, param));
-        else
-          s.write(symb(**v_it), param);
+        addStore(nextParam, param, *v_it);
         i++;
         r_it++;
         v_it++;
@@ -2014,9 +2028,6 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       "arg_error", if (csi.m_fparams.size() != bind::domainSz(fi.sumPred)) {
         printCS(csi, fi);
       });
-
-  // TODO: it is more efficient if the definitions appear before the callsite,
-  // at least for the IN case
 
   assert(csi.m_fparams.size() == bind::domainSz(fi.sumPred));
   assert(checkArgs(bind::fapp(fi.sumPred, csi.m_fparams)));
@@ -2103,8 +2114,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
       if (isMemScalar(cCrField) || (m_preproc->getNumAccesses(cCeSAS, &F) == 0))
         continue;
 
-      if (cCeSAS.getNode()->isRead()) {
-        assert(hasOrigMemSymbol(cCrField, MemOpt::IN));
+      if (hasOrigMemSymbol(cCrField, MemOpt::IN)){
         // force creation of a new mem symbol for later
         getFreshMapSymbol(cCrField, cCeSAS, F, MemOpt::IN);
         addKeyValCell(cCrField, cCeSAS, basePtrIn, offset);
@@ -2124,14 +2134,12 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
   for (auto &links : nCe->getLinks()) {
     const Field &f = links.first;
     const Cell &nextCeField = *links.second;
-    const Cell nextCr = smCS.get(nextCeField);
-    Cell nextCeSAS = smCI.get(nextCeField);
+    const Cell nextCr = smCS.get(Cell(cCe,f.getOffset()));
 
-    // TODO: replace by consulting SAS node
-    Expr origIn = nextCeSAS.getNode()->isRead()
+    Expr origIn = hasOrigMemSymbol(nextCr, MemOpt::IN)
                       ? getOrigMemSymbol(nextCr, MemOpt::IN)
                       : getOrigMemSymbol(nextCr, MemOpt::OUT);
-    Expr origOut = nextCeSAS.getNode()->isModified()
+    Expr origOut = hasOrigMemSymbol(nextCr, MemOpt::OUT)
                        ? getOrigMemSymbol(nextCr, MemOpt::OUT)
                        : origIn;
 

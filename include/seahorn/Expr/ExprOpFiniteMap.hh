@@ -238,14 +238,6 @@ inline Expr constrainKeys(Expr map, const Range &keys) {
   return mk<SAME_KEYS>(map, constFiniteMapKeys(keys));
 }
 
-// // TODO: inline a recursive function?
-// inline bool finiteMapTy(const Expr e) {
-//   if (isOpX<ITE>(e))
-//     return finiteMapTy(e->right());
-//   else
-//     return bind::isFiniteMapConst(e);
-// }
-
 // TODO: inline a recursive function?
 inline bool returnsFiniteMap(const Expr e) {
   if (isOpX<ITE>(e))
@@ -500,6 +492,10 @@ inline Expr mkVal(Expr mapConst, unsigned idx) {
   }
 
   return constFiniteMap(keys, mkDefault(mapConst, vTy), values);
+}
+
+inline Expr mkExpand(Expr fmv) {
+  return seahorn::fmap_transf::mkExpandCore(fmv);
 }
 
 } // namespace finite_map

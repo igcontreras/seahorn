@@ -119,6 +119,7 @@ private:
 // shared with FMapOpSemTransf
 namespace seahorn {
 namespace fmap_transf {
+
 Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei);
 Expr replaceDefKeys(Expr defmap, Expr keys);
 template <typename Range>
@@ -130,7 +131,9 @@ Expr mkSetCore(Expr fm, Expr key, Expr v);
 Expr mkIteDefCore(Expr cond, Expr fm1, Expr fm2);
 Expr mkIteCore(Expr cond, Expr fm1, Expr fm2);
 Expr mkSameKeysCore(Expr e);
-Expr mkInlineDefs(Expr def, ExprMap defmap);
+Expr mkInlineDefs(Expr def, ExprMap &defmap);
 void insertVarsDef(Expr defmap, ExprSet &vars);
+Expr mkExpandCore(Expr fm);
+
 } // namespace fmap_transf
 } // namespace seahorn
