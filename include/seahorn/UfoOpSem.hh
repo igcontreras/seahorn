@@ -209,6 +209,7 @@ public:
   }
 
   Expr symb(const Value &v) override;
+  void onFunctionEntry(const llvm::Function &fn) override;
   void execCallSite(CallSiteInfo &CS, ExprVector &side, SymStore &s) override;
 
   void execMemInit(CallSite &CS, Expr mem, ExprVector &side,
@@ -219,7 +220,7 @@ protected:
   void addMemSymbol(const seadsa::Cell &c, Expr A, MemOpt ao) override;
 
 private:
-  // FMOpSemTransf m_fmt;
+  const Function *m_ctxf = nullptr;
 
   // hides how the memory is split
   using FMapExprMap = std::map<Expr, ExprVector>;

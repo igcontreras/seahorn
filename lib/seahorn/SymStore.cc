@@ -81,8 +81,6 @@ Expr SymStore::havoc(Expr key) {
         unsigned idx = variant::variantNum(bind::fname(bind::fname(v1))) + 1;
         val = finite_map::mkVal(key, idx);
       }
-    }  else if(finite_map::isFmapVal(key)){
-      errs() << "fmap val " << *key << "\n";
     }
     //     Expr d = finite_map::fmapDefDefault(val);
     //     Expr fname = bind::fname(bind::fname(val));

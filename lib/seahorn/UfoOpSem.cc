@@ -1028,6 +1028,8 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
     /// -- check if globals need to be initialized
     initGlobals(BB);
 
+    m_sem.onFunctionEntry(*BB.getParent());
+
     // read the error flag to make it live
     m_s.read(m_sem.errorFlag(BB));
   }
@@ -1741,7 +1743,7 @@ void InterMemStats::copyTo(InterMemStats &ims) {
   ims.m_node_safe = m_node_safe;
 }
 
-// TODO: Move to FMapUfoOpSem.cc?
+void FMapUfoOpSem::onFunctionEntry(const Function &fn) { m_ctxf = &fn; }
 
 Expr FMapUfoOpSem::symb(const Value &I) {
 
@@ -1783,9 +1785,8 @@ Expr FMapUfoOpSem::symb(const Value &I) {
       F = inst->getParent()->getParent();
     else if (const Argument *a = dyn_cast<const Argument>(&I))
       F = a->getParent();
-    // -- TODO: we cannot know in which function we are from a GlobalVariable,
-    // -- the function is needed to obtain the graph.
-    // else if (const GlobalVariable *gv = dyn_cast<const GlobalVariable>(&I))
+    else if (const GlobalVariable *gv = dyn_cast<const GlobalVariable>(&I))
+      F = m_ctxf;
     else
       return UfoOpSem::symb(I);
 
@@ -2144,13 +2145,13 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
   for (auto &links : nCe->getLinks()) {
     const Field &f = links.first;
     const Cell &nextCeField = *links.second;
-    const Cell nextCr = smCS.get(Cell(cCe, f.getOffset()));
+    const Cell cCr = smCS.get(Cell(cCe, f.getOffset()));
 
-    Expr origIn = hasOrigMemSymbol(nextCr, MemOpt::IN)
-                      ? getOrigMemSymbol(nextCr, MemOpt::IN)
-                      : getOrigMemSymbol(nextCr, MemOpt::OUT);
-    Expr origOut = hasOrigMemSymbol(nextCr, MemOpt::OUT)
-                       ? getOrigMemSymbol(nextCr, MemOpt::OUT)
+    Expr origIn = hasOrigMemSymbol(cCr, MemOpt::IN)
+                      ? getOrigMemSymbol(cCr, MemOpt::IN)
+                      : getOrigMemSymbol(cCr, MemOpt::OUT);
+    Expr origOut = hasOrigMemSymbol(cCr, MemOpt::OUT)
+                       ? getOrigMemSymbol(cCr, MemOpt::OUT)
                        : origIn;
 
     unsigned offset = f.getOffset();
@@ -2416,12 +2417,13 @@ void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
   for (auto &links : nBU->getLinks()) {
     const Cell &nextCBU = *links.second;
     const Cell nextCSAS = sm.get(nextCBU);
+    const Field &f = links.first;
+    const Cell cSASField = sm.get(Cell(cBU, f.getOffset()));
 
-    if (!hasExprCell(nim, nextCSAS))
+    if (!hasExprCell(nim, cSASField))
       continue;
 
-    const Field &f = links.first;
-    Expr memS = getExprCell(nim, nextCSAS);
+    Expr memS = getExprCell(nim, cSASField);
     Expr nextPtr = memObtainValue(memS, addOffset(basePtr, f.getOffset()));
     recCollectReachableKeys(nextCBU, F, nextPtr, safeBUNs, safeNs, sm, ckm,
                             nim);

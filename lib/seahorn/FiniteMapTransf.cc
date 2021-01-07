@@ -739,8 +739,8 @@ Expr mkSetDefCore(Expr fmd, Expr key, Expr v) {
     int mit = 0;
     int nextCh = matches[0]; // TODO: use iterator over conds?
     for (int i = 0; i < ks->arity(); i++, ov_it++) {
-      if (i == nextCh) {
-        nvalues[i] = boolop::lite(conds[matches[mit]], v, *ov_it);
+      if ((mit < matches.size()) && (i == nextCh)) {
+        nvalues[i] = boolop::lite(conds[mit], v, *ov_it);
         nextCh = matches[++mit];
       } else
         nvalues[i] = *ov_it;

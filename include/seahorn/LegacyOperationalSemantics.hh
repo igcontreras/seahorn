@@ -66,6 +66,11 @@ public:
 
   virtual void execBr(SymStore &s, const BasicBlock &src, const BasicBlock &dst,
                       ExprVector &side, Expr act) = 0;
+
+  // -- TODO: copied from OperationalSemantics, it is needed for
+  // -- FMapUfoOpSem, the function being processed is needed in symb
+  // \brief Called when a function is entered
+  virtual void onFunctionEntry(const llvm::Function &fn) {}
 };
 
 /// \brief Evaluate (read) all arguments of \p fi in store \p s
