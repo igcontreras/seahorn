@@ -744,15 +744,17 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         }
       }
     } else if (MemCpyInst *MCI = dyn_cast<MemCpyInst>(&I)) {
-      if (finite_map::returnsFiniteMap(m_inMem))
-        write(*m_outValue, m_inMem);
-      else
-        m_side.push_back(mk<EQ>(m_outMem, m_inMem));
+      if (m_inMem != nullptr)
+        if (finite_map::returnsFiniteMap(m_inMem))
+          write(*m_outValue, m_inMem);
+        else
+          m_side.push_back(mk<EQ>(m_outMem, m_inMem));
     } else if (MemMoveInst *MMI = dyn_cast<MemMoveInst>(&I)) {
-      if (finite_map::returnsFiniteMap(m_inMem))
-        write(*m_outValue, m_inMem);
-      else
-        m_side.push_back(mk<EQ>(m_outMem, m_inMem));
+      if (m_inMem != nullptr)
+        if (finite_map::returnsFiniteMap(m_inMem))
+          write(*m_outValue, m_inMem);
+        else
+          m_side.push_back(mk<EQ>(m_outMem, m_inMem));
     }
     // else if (F.getName ().equals ("verifier.assert"))
     // {
@@ -1768,15 +1770,25 @@ Expr FMapUfoOpSem::symb(const Value &I) {
             }
           }
         } else if (const PHINode *PI = dyn_cast<const PHINode>(&I)) {
-          Value *vPI = PI->getIncomingValue(0);
+          const Value *vPI = PI->getIncomingValue(0);
           Expr incomingConst = symb(*vPI);
           return bind::mkConst(mkTerm<const Value *>(&I, m_efac),
                                bind::rangeTy(bind::name(incomingConst)));
         }
       }
     }
-  } else if (const Instruction *inst = dyn_cast<const Instruction>(&I)) {
-    const Function *F = inst->getParent()->getParent();
+  } else {
+    const Function *F = nullptr;
+    if (const Instruction *inst = dyn_cast<const Instruction>(&I))
+      F = inst->getParent()->getParent();
+    else if (const Argument *a = dyn_cast<const Argument>(&I))
+      F = a->getParent();
+    // -- TODO: we cannot know in which function we are from a GlobalVariable,
+    // -- the function is needed to obtain the graph.
+    // else if (const GlobalVariable *gv = dyn_cast<const GlobalVariable>(&I))
+    else
+      return UfoOpSem::symb(I);
+
     GlobalAnalysis &ga = m_shadowDsa->getDsaAnalysis();
     if (ga.hasGraph(*F)) {
       Graph &g = ga.getGraph(*F);
@@ -1792,7 +1804,7 @@ Expr FMapUfoOpSem::symb(const Value &I) {
     }
   }
   return UfoOpSem::symb(I);
-} // namespace seahorn
+}
 
 // for debugging
 static bool checkArgs(Expr fapp) {
@@ -1894,30 +1906,28 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   }
 
   bool isTrueActiveLit = isOpX<TRUE>(csi.m_fparams[0]); // active literal
-  ExprVector
-          arrayStores; // copies are not directly added to `side` because we
-                       // want them to be active only if the function is
+  ExprVector arrayStores; // copies are not directly added to `side` because we
+                          // want them to be active only if the function is
 
   // -- processes the arguments that require extra stores. The stores are
   // -- protected by the active literal so that they are not used by the solver
   // -- if the function is not active. If the active literal is true, the
   // -- SymStore is updated instead
-  auto addStore =
-      [&](const Expr lhs, const Expr rhs, const Value *v) {
-        if (OpSemVisitor::returnsArray(lhs))
-          arrayStores.push_back(mk<EQ>(lhs, rhs));
-        else if (isTrueActiveLit)
-          s.write(symb(*v), rhs);
-        else {
-          assert(finite_map::returnsFiniteMap(rhs));
-          Expr rhsv = finite_map::fmapDefValues(finite_map::mkExpand(rhs));
-          Expr lhsv = finite_map::fmapDefValues(lhs);
-          auto la_it = lhsv->begin();
-          for (auto ra_it = rhsv->begin(); ra_it != rhsv->end() ; ra_it++, la_it++)
-            arrayStores.push_back(mk<EQ>(*la_it, *ra_it));
-          assert(la_it == lhsv->end());
-        }
-      };
+  auto addStore = [&](const Expr lhs, const Expr rhs, const Value *v) {
+    if (OpSemVisitor::returnsArray(lhs))
+      arrayStores.push_back(mk<EQ>(lhs, rhs));
+    else if (isTrueActiveLit)
+      s.write(symb(*v), rhs);
+    else {
+      assert(finite_map::returnsFiniteMap(rhs));
+      Expr rhsv = finite_map::fmapDefValues(finite_map::mkExpand(rhs));
+      Expr lhsv = finite_map::fmapDefValues(lhs);
+      auto la_it = lhsv->begin();
+      for (auto ra_it = rhsv->begin(); ra_it != rhsv->end(); ra_it++, la_it++)
+        arrayStores.push_back(mk<EQ>(*la_it, *ra_it));
+      assert(la_it == lhsv->end());
+    }
+  };
 
   // add definitions in an ordered way
   ExprMap extraDefs;
@@ -1981,7 +1991,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       Expr cellE = m_cellReplaceOut[pair];
       csi.m_fparams[i] = extraDefs[cellE];
       LOG("fmap_param", errs() << " [OUT] replaced " << *param
-          << " by: " << *csi.m_fparams[i] << "\n";);
+                               << " by: " << *csi.m_fparams[i] << "\n";);
       if (m_fmOut.count(param) > 0) {
         // there may not be fmOut if nodes are split
         Expr extra = fmap_transf::mkInlineDefs(m_fmOut[param], extraDefs);
@@ -2114,7 +2124,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
       if (isMemScalar(cCrField) || (m_preproc->getNumAccesses(cCeSAS, &F) == 0))
         continue;
 
-      if (hasOrigMemSymbol(cCrField, MemOpt::IN)){
+      if (hasOrigMemSymbol(cCrField, MemOpt::IN)) {
         // force creation of a new mem symbol for later
         getFreshMapSymbol(cCrField, cCeSAS, F, MemOpt::IN);
         addKeyValCell(cCrField, cCeSAS, basePtrIn, offset);
@@ -2134,7 +2144,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
   for (auto &links : nCe->getLinks()) {
     const Field &f = links.first;
     const Cell &nextCeField = *links.second;
-    const Cell nextCr = smCS.get(Cell(cCe,f.getOffset()));
+    const Cell nextCr = smCS.get(Cell(cCe, f.getOffset()));
 
     Expr origIn = hasOrigMemSymbol(nextCr, MemOpt::IN)
                       ? getOrigMemSymbol(nextCr, MemOpt::IN)

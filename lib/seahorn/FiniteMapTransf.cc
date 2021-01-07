@@ -222,7 +222,9 @@ bool evaluableDsaExpr(Expr e) {
 
 static Expr evalCondDsa(Expr cond) {
 
-  if (!evaluableDsaExpr(cond->left()) || !evaluableDsaExpr(cond->right()))
+  if (cond->left() == cond->right())
+    return mk<TRUE>(cond->efac());
+  else if (!evaluableDsaExpr(cond->left()) || !evaluableDsaExpr(cond->right()))
     return cond;
 
   unsigned lo = getOffsetCellExpr(cond->left());
@@ -738,8 +740,8 @@ Expr mkSetDefCore(Expr fmd, Expr key, Expr v) {
     int nextCh = matches[0]; // TODO: use iterator over conds?
     for (int i = 0; i < ks->arity(); i++, ov_it++) {
       if (i == nextCh) {
-        nvalues[i] = mk<ITE>(conds[matches[mit]], v, *ov_it);
-        nextCh = matches[mit++];
+        nvalues[i] = boolop::lite(conds[matches[mit]], v, *ov_it);
+        nextCh = matches[++mit];
       } else
         nvalues[i] = *ov_it;
     }
@@ -808,7 +810,7 @@ Expr mkSameKeysCore(Expr e) {
   Expr defl = finite_map::fmapDefKeys(e->left());
   Expr defr = e->right();
 
-  assert(isOpX <CONST_FINITE_MAP_KEYS>(defl));
+  assert(isOpX<CONST_FINITE_MAP_KEYS>(defl));
   assert(isOpX<CONST_FINITE_MAP_KEYS>(defr));
 
   assert(defl->arity() == defr->arity());
@@ -886,6 +888,5 @@ Expr mkExpandCore(Expr fm) {
 }
 
 } // namespace fmap_transf
-
 
 } // namespace seahorn
