@@ -11,6 +11,8 @@ using namespace expr;
 using namespace expr::op;
 
 namespace seahorn {
+InterMemFMStats g_imfm_stats;
+
 // ----------------------------------------------------------------------
 //  FiniteMapArgsVisitor
 // ----------------------------------------------------------------------
@@ -325,36 +327,36 @@ static Expr getValueAtDef(Expr map, Expr k, unsigned pos,
 }
 
 // to be replaced by finite_map::mkVal
-static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
-  Expr mapTy = bind::rangeTy(bind::name(mapConst));
-  Expr vTy = sort::finiteMapValTy(mapTy);
-  Expr keysTy = sort::finiteMapKeyTy(mapTy);
-  Expr kTy = bind::rangeTy(bind::name(keysTy->first()));
-  ExprVector keys(keysTy->arity());
-  ExprVector values(keysTy->arity());
+// static Expr mkEmptyConstMap(Expr mapConst, FMapExprsInfo &fmei) {
+//   Expr mapTy = bind::rangeTy(bind::name(mapConst));
+//   Expr vTy = sort::finiteMapValTy(mapTy);
+//   Expr keysTy = sort::finiteMapKeyTy(mapTy);
+//   Expr kTy = bind::rangeTy(bind::name(keysTy->first()));
+//   ExprVector keys(keysTy->arity());
+//   ExprVector values(keysTy->arity());
 
-  auto k_it = keys.begin();
-  auto v_it = values.begin();
-  for (auto kty_it = keysTy->begin(); kty_it != keysTy->end();
-       kty_it++, k_it++, v_it++) {
-    *k_it = finite_map::mkVarKey(mapConst, *kty_it, kTy);
-    fmei.m_vars.insert(*k_it);
-    *v_it = finite_map::mkVarGet(mapConst, *kty_it, 0, vTy);
-    fmei.m_vars.insert(*v_it);
-  }
+//   auto k_it = keys.begin();
+//   auto v_it = values.begin();
+//   for (auto kty_it = keysTy->begin(); kty_it != keysTy->end();
+//        kty_it++, k_it++, v_it++) {
+//     *k_it = finite_map::mkVarKey(mapConst, *kty_it, kTy);
+//     fmei.m_vars.insert(*k_it);
+//     *v_it = finite_map::mkVarGet(mapConst, *kty_it, 0, vTy);
+//     fmei.m_vars.insert(*v_it);
+//   }
 
-  Expr defaultV = finite_map::mkDefault(mapConst, vTy);
-  // fmei.m_vars.insert(defaultV);
+//   Expr defaultV = finite_map::mkDefault(mapConst, vTy);
+//   // fmei.m_vars.insert(defaultV);
 
-  Expr mapDef = finite_map::constFiniteMap(keys, defaultV, values);
-  fmei.m_fmapVarTransf[mapConst] = mapDef;
-  fmei.m_type[mapConst] = mapTy;
-  fmei.m_type[mapDef] = mapTy;
-  Expr mapLmdKeys = finite_map::mkKeys(keys, fmei.m_efac);
-  fmei.m_fmapDefk[mapConst] = finite_map::fmapDefKeys(mapDef);
+//   Expr mapDef = finite_map::constFiniteMap(keys, defaultV, values);
+//   fmei.m_fmapVarTransf[mapConst] = mapDef;
+//   fmei.m_type[mapConst] = mapTy;
+//   fmei.m_type[mapDef] = mapTy;
+//   Expr mapLmdKeys = finite_map::mkKeys(keys, fmei.m_efac);
+//   fmei.m_fmapDefk[mapConst] = finite_map::fmapDefKeys(mapDef);
 
-  return mapDef;
-}
+//   return mapDef;
+// }
 
 // \brief `ml` contains the same values as `mr`.
 static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
@@ -413,12 +415,9 @@ static Expr mkEqCore(Expr ml, Expr mr, FMapExprsInfo &fmei) {
       skipVs) // skip this if it is the same expansion of keys and values
     return mk<TRUE>(fmei.m_efac);
 
-  // unsigned size = (!skipVs && !skipKs) ? 2 : 1;
-  // ExprVector conj(mlDefk->arity() * size);
   ExprVector conj;
   auto l_it = mlDefk->begin();
   auto r_it = mrDefk->begin();
-  // auto conj_it = conj.begin();
 
   for (int i = 0; l_it != mlDefk->end(); i++, l_it++, r_it++) {
     // unify keys (from the definition)
@@ -517,7 +516,7 @@ static Expr mkSetCore(Expr map, Expr key, Expr v, FMapExprsInfo &fmei) {
 
 static Expr getDefFmapConst(Expr m, FMapExprsInfo &fmei) {
   if (fmei.m_fmapDefk.count(m) == 0)
-    return finite_map::fmapDefKeys(mkEmptyConstMap(m, fmei));
+    return finite_map::fmapDefKeys(finite_map::mkVal(m, 0));
   else
     return fmei.m_fmapDefk[m];
 }
@@ -651,6 +650,7 @@ Expr mkGetDefCore(Expr fmd, Expr key) {
   if (matches.empty())
     return vs->last();
 
+  LOG("inter_mem_counters", g_imfm_stats.newAlias(matches.size()););
   if (matches.size() == 1)
     return vs->arg(matches[0]);
 
@@ -660,7 +660,7 @@ Expr mkGetDefCore(Expr fmd, Expr key) {
   auto c_it = ++conds.rbegin();
   // construct ite for the keys that match
   for (; m_it != matches.rend(); m_it++, c_it++)
-    ite = boolop::lite(*c_it, vs->arg(*m_it), ite);
+    ite = expr::op::finite_map::mkFMIte(*c_it, vs->arg(*m_it), ite);
 
   return ite;
 }
@@ -703,6 +703,8 @@ Expr mkSetDefCore(Expr fmd, Expr key, Expr v) {
 
   Expr vs = finite_map::fmapDefValues(fmd);
 
+  LOG("inter_mem_counters", g_imfm_stats.newSize(vs->arity()););
+
   if (vs->arity() == 1) { // fmap of size 1
     ExprVector value = {v};
     Expr res = replaceDefValues(fmd, value);
@@ -740,7 +742,7 @@ Expr mkSetDefCore(Expr fmd, Expr key, Expr v) {
     int nextCh = matches[0]; // TODO: use iterator over conds?
     for (int i = 0; i < ks->arity(); i++, ov_it++) {
       if ((mit < matches.size()) && (i == nextCh)) {
-        nvalues[i] = boolop::lite(conds[mit], v, *ov_it);
+        nvalues[i] = expr::op::finite_map::mkFMIte(conds[mit], v, *ov_it);
         nextCh = matches[++mit];
       } else
         nvalues[i] = *ov_it;

@@ -23,6 +23,8 @@ namespace seahorn {
 // counters for encoding with InterProcMem option
 InterMemStats g_im_stats;
 unsigned FmapsMaxKeys;
+bool FmapsNegCond;
+extern InterMemFMStats g_imfm_stats;
 } // namespace seahorn
 
 using namespace seahorn;
@@ -87,6 +89,12 @@ static llvm::cl::opt<unsigned, true> MaxKeys(
     "horn-fmap-max-keys",
     llvm::cl::desc("Maximum number of different keys allowed in a finite map"),
     llvm::cl::location(seahorn::FmapsMaxKeys), cl::init(1));
+
+static llvm::cl::opt<bool, true> FMNegCond(
+    "horn-fmap-neg-cond",
+    llvm::cl::desc("Negate condition and swap th and el in ITEs in vcgen with finite maps"),
+    llvm::cl::location(seahorn::FmapsNegCond), cl::init(false));
+
 
 static const Value *extractUniqueScalar(CallSite &cs) {
   if (!EnableUniqueScalars)
@@ -1923,10 +1931,17 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       assert(finite_map::returnsFiniteMap(rhs));
       Expr rhsv = finite_map::fmapDefValues(finite_map::mkExpand(rhs));
       Expr lhsv = finite_map::fmapDefValues(lhs);
-      auto la_it = lhsv->begin();
-      for (auto ra_it = rhsv->begin(); ra_it != rhsv->end(); ra_it++, la_it++)
-        arrayStores.push_back(mk<EQ>(*la_it, *ra_it));
-      assert(la_it == lhsv->end());
+      auto lv_it = lhsv->begin();
+      for (auto rv_it = rhsv->begin(); rv_it != rhsv->end(); rv_it++, lv_it++)
+        arrayStores.push_back(mk<EQ>(*lv_it, *rv_it));
+      assert(lv_it == lhsv->end());
+
+      Expr rhsk = finite_map::fmapDefKeys(rhs);
+      Expr lhsk = finite_map::fmapDefKeys(lhs);
+      auto lk_it = lhsv->begin();
+      for (auto rk_it = rhsv->begin(); rk_it != rhsv->end(); rk_it++, lk_it++)
+        if(*lk_it != *rk_it)
+          arrayStores.push_back(mk<EQ>(*lk_it, *rk_it));
     }
   };
 

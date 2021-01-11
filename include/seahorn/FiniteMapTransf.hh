@@ -7,6 +7,8 @@
 #include "seahorn/HornClauseDB.hh"
 #include "seahorn/HornModelConverter.hh"
 
+#include "seahorn/UfoOpSem.hh"
+
 #include "seahorn/Support/SeaDebug.h"
 
 using namespace expr;

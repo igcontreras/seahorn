@@ -121,6 +121,7 @@ namespace seahorn {
 // only updated if the log "inter_mem_counters" is active
 
 extern InterMemStats g_im_stats;
+extern InterMemFMStats g_imfm_stats;
 } // namespace seahorn
 
 namespace seahorn {
@@ -343,18 +344,8 @@ bool HornifyModule::runOnModule(Module &M) {
            : m_db.getRules()) cl.get()
           ->dump(););
 
-  // DEBUG: type-check clauses after vcgen
-  LOG(
-      "HCDB_check_types",
-      TypeChecker tc;
-      for (auto &rule
-             : m_db.getRules()) {
-        if (tc.typeOf(rule.get()) == sort::errorTy(m_efac)) {
-          errs() << *tc.getErrorExp() << "\n";
-        }
-      });
-
-  LOG("inter_mem_counters", if (InterProcMem) g_im_stats.print(););
+  LOG("inter_mem_counters", if (InterProcMem) g_im_stats.print();
+      else if (InterProcMemFmaps) g_imfm_stats.print(););
 
   /**
      TODO:
@@ -447,13 +438,16 @@ bool HornifyModule::runOnFunction(Function &F) {
   // HACK because reset counters because "run()" calls VisitCallSite
   // TODO: store part of what is computed by LiveSymbols?
   InterMemStats tmp_im_stats;
+  InterMemFMStats tmp_imfm_stats;
 
-  LOG("inter_mem_counters", g_im_stats.copyTo(tmp_im_stats););
+  LOG("inter_mem_counters", if (InterProcMem) g_im_stats.copyTo(tmp_im_stats);
+      else g_imfm_stats.copyTo(tmp_imfm_stats););
 
   /// -- run LiveSymbols
   r.first->second.run();
 
-  LOG("inter_mem_counters", tmp_im_stats.copyTo(g_im_stats));
+  LOG("inter_mem_counters", if (InterProcMem) tmp_im_stats.copyTo(g_im_stats);
+      else g_imfm_stats.copyTo(tmp_imfm_stats););
 
   hf->runOnFunction(F);
 

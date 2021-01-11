@@ -196,6 +196,45 @@ struct InterMemStats {
   void copyTo(InterMemStats &ims);
 };
 
+struct InterMemFMStats {
+  // !brief counters for encoding with InterProcMemFMaps flag
+  unsigned m_max_size = 0;
+  unsigned m_max_alias = 0;
+  unsigned m_n_not_unique = 0;
+
+  void print() {
+    llvm::outs() << "BRUNCH_STAT "
+                 << "FMMaxSize"
+                 << " " << m_max_size << "\n";
+    llvm::outs() << "BRUNCH_STAT "
+                 << "FMMaxAliasGet"
+                 << " " << m_max_alias << "\n";
+    llvm::outs() << "BRUNCH_STAT "
+                 << "FMNotUniqueGets"
+                 << " " << m_n_not_unique << "\n";
+  }
+
+  void copyTo(InterMemFMStats &ims) {
+    ims.m_max_size = m_max_size;
+    ims.m_max_alias = m_max_alias;
+    ims.m_n_not_unique = m_n_not_unique;
+  }
+
+  // \brief `n_alias` is the number of possible cells that alias, if only 1,
+  // then the cell is unique, because it is only accessed through one place
+  inline void newAlias(unsigned n_alias) {
+    if (n_alias > m_max_alias)
+      m_max_alias = n_alias;
+    if (n_alias > 1)
+      m_n_not_unique++;
+  }
+
+  inline void newSize(unsigned size) {
+    if (size > m_max_size)
+      m_max_size = size;
+  }
+};
+
 class FMapUfoOpSem : public MemUfoOpSem {
 
 public:
