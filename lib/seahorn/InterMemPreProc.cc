@@ -284,13 +284,22 @@ void InterMemPreProc::runOnFunction(const Function *F) {
     recProcessNode(buG.getRetCell(*F), safeBU, safeSAS, sm, sm, cim);
 }
 
-unsigned InterMemPreProc::getNumCIAccessesCellSummary(const Cell &c,
-                                                      const Function *f) {
+unsigned InterMemPreProc::getCINumKeysSummary(const Cell &c,
+                                              const Function *f) {
   assert(m_smF.count(f) > 0);
   SimulationMapper &sm = m_smF[f];
-  const Cell nCI = sm.get(c);
+  const Cell &cCI = sm.get(c);
 
-  return getNumAccesses(nCI, f);
+  return getNumKeys(cCI, f);
+}
+
+unsigned InterMemPreProc::getCIMaxAliasSummary(const Cell &c,
+                                               const Function *f) {
+  assert(m_smF.count(f) > 0);
+  SimulationMapper &sm = m_smF[f];
+  const Cell &cCI = sm.get(c);
+
+  return getMaxAlias(cCI, f);
 }
 
 ExprVector &InterMemPreProc::getKeysCell(const Cell &c, const Function *f) {
@@ -302,7 +311,7 @@ ExprVector &InterMemPreProc::getKeysCellSummary(const Cell &c,
                                                 const Function *f) {
   assert(m_smF.count(f) > 0);
   SimulationMapper &sm = m_smF[f];
-  const Cell cCI = sm.get(c);
+  const Cell &cCI = sm.get(c);
 
   return m_fcim[f][cellToPair(cCI)].m_ks;
 }
@@ -338,10 +347,12 @@ void InterMemPreProc::recProcessNode(const Cell &cFrom,
     return;
 
   const Cell &cTo = smCI.get(cFrom);
+  CellInfo &ciTo = cim[cellToPair(cTo)];
+  ciTo.m_nacss++;
   if (isSafeNode(toSafeNodes, cTo.getNode()))
     for (auto field : nFrom->types()) {
-      Cell cFromField(cFrom, field.getFirst());
-      Cell cToField = smCS.get(cFromField);
+      const Cell cFromField(cFrom, field.getFirst());
+      const Cell &cToField = smCS.get(cFromField);
       llvm::Optional<unsigned> opt_cellId = m_shadowDsa.getCellId(cToField);
       assert(opt_cellId.hasValue());
 
@@ -373,7 +384,7 @@ void InterMemPreProc::precomputeFiniteMapTypes(const CallSite &CS,
 
   GlobalAnalysis &ga = m_shadowDsa.getDsaAnalysis();
 
-  Function *f_callee = CS.getCalledFunction();
+  const Function *f_callee = CS.getCalledFunction();
   if (!ga.hasSummaryGraph(*f_callee))
     return;
 
@@ -381,7 +392,8 @@ void InterMemPreProc::precomputeFiniteMapTypes(const CallSite &CS,
   Graph &calleeG = ga.getSummaryGraph(*f_callee);
 
   SimulationMapper &smCS = getSimulationCS(CS); // for aliasing info in types
-  SimulationMapper &smCI = getSimulationF(CS.getCaller()); // for checking bounded mem
+  SimulationMapper &smCI =
+      getSimulationF(CS.getCaller()); // for checking bounded mem
 
   // -- compute number of accesses to safe nodes
   CellInfoMap &cim = m_icim[i];
@@ -396,7 +408,6 @@ void InterMemPreProc::precomputeFiniteMapTypes(const CallSite &CS,
 
   if (calleeG.hasRetCell(*f_callee)) {
     const Cell &c = calleeG.getRetCell(*f_callee);
-    // if (c.getNode()->isModified())
     recProcessNode(c, safeCe, safeCr, smCS, smCI, cim);
   }
 }

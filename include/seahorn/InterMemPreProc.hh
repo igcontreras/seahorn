@@ -93,7 +93,7 @@ public:
   NodeSet &getSafeNodes(const Function *f) { return m_safeSASF[f]; }
   NodeSet &getSafeNodesBU(const Function *f) { return m_safeBUF[f]; }
 
-  unsigned getNumAccesses(const Cell &c, const Function *f) {
+  unsigned getNumKeys(const Cell &c, const Function *f) {
     assert(m_fcim.count(f) > 0);
     if (m_fcim[f].count({c.getNode(), getOffset(c)}) == 0)
       return 0;
@@ -101,7 +101,16 @@ public:
       return m_fcim[f][{c.getNode(), getOffset(c)}].m_nks;
   }
 
-  unsigned getNumCIAccessesCellSummary(const Cell &c, const Function *f);
+  unsigned getMaxAlias(const Cell &c, const Function *f) {
+    assert(m_fcim.count(f) > 0);
+    if (m_fcim[f].count({c.getNode(), getOffset(c)}) == 0)
+      return 0;
+    else
+      return m_fcim[f][{c.getNode(), getOffset(c)}].m_nacss;
+  }
+
+  unsigned getCINumKeysSummary(const Cell &c, const Function *f);
+  unsigned getCIMaxAliasSummary(const Cell &c, const Function *f);
 
   expr::ExprVector &getKeysCell(const Cell &c, const Function *f);
   expr::ExprVector &getKeysCellSummary(const Cell &c, const Function *f);
@@ -121,11 +130,6 @@ private:
   template <typename ValueT>
   ValueT &findCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT> &map,
                       const Cell &c);
-
-  // template <typename ValueT>
-  // unsigned countCellMap(DenseMap<std::pair<const Node *, unsigned>, ValueT>
-  // &map,
-  //                       const Cell &c);
   expr::ExprVector &findKeysCellMap(CellKeysMap &map, const Cell &c);
 };
 } // namespace seahorn

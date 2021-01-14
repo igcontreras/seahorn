@@ -626,9 +626,6 @@ namespace fmap_transf {
 // -- obtains a value from a definition
 Expr mkGetDefCore(Expr fmd, Expr key) {
 
-  LOG("fmap_transf", errs()
-                         << "-- mkGetDefCore " << *fmd << " " << *key << "\n";);
-
   Expr ks = finite_map::fmapDefKeys(fmd);
   Expr vs = finite_map::fmapDefValues(fmd);
 
@@ -667,8 +664,6 @@ Expr mkGetDefCore(Expr fmd, Expr key) {
 
 Expr mkGetCore(Expr map, Expr key) {
 
-  LOG("fmap_transf", errs()
-                         << " ---- mkSetCore " << *map << " " << *key << "\n");
   Expr fmd;
 
   if (isOpX<ITE>(map))
@@ -676,11 +671,10 @@ Expr mkGetCore(Expr map, Expr key) {
   else
     fmd = map;
 
-  if (finite_map::isFmapVal(fmd)) {
-    LOG("fmap_transf", errs() << "   --->" << *mkGetDefCore(fmd, key) << "\n";);
+  if(finite_map::isFmapVal(fmd))
     return mkGetDefCore(fmd, key);
-  }
-  return finite_map::get(fmd, key);
+  else
+    return finite_map::get(fmd, key);
 }
 
 Expr replaceDefKeys(Expr fmd, Expr keys) {
@@ -698,18 +692,13 @@ template <typename Range> Expr replaceDefValues(Expr fmd, const Range &values) {
 // -- value could be placed in several keys
 Expr mkSetDefCore(Expr fmd, Expr key, Expr v) {
 
-  LOG("fmap_transf", errs() << "-- mkSetDefCore " << *fmd << " " << *key << " "
-                            << *v << "\n";);
-
   Expr vs = finite_map::fmapDefValues(fmd);
 
   LOG("inter_mem_counters", g_imfm_stats.newSize(vs->arity()););
 
   if (vs->arity() == 1) { // fmap of size 1
     ExprVector value = {v};
-    Expr res = replaceDefValues(fmd, value);
-    LOG("fmap_transf", errs() << "\t" << *res << "\n";);
-    return res;
+    return replaceDefValues(fmd, value);
   }
 
   std::vector<unsigned> matches;
@@ -738,6 +727,7 @@ Expr mkSetDefCore(Expr fmd, Expr key, Expr v) {
       else
         nvalues[i] = *ov_it;
   } else {
+    LOG("inter_mem_counters", g_imfm_stats.newAlias(matches.size()););
     int mit = 0;
     int nextCh = matches[0]; // TODO: use iterator over conds?
     for (int i = 0; i < ks->arity(); i++, ov_it++) {
@@ -749,15 +739,10 @@ Expr mkSetDefCore(Expr fmd, Expr key, Expr v) {
     }
   }
 
-  Expr res = replaceDefValues(fmd, nvalues);
-  LOG("fmap_transf", errs() << "\t" << *res << "\n";);
-  return res;
+  return replaceDefValues(fmd, nvalues);
 }
 
 Expr mkSetCore(Expr map, Expr key, Expr v) {
-
-  LOG("fmap_transf",
-      errs() << " ---- mkSetCore " << *map << " " << *key << " " << *v << "\n");
 
   Expr fmd;
 
@@ -766,13 +751,10 @@ Expr mkSetCore(Expr map, Expr key, Expr v) {
   else
     fmd = map;
 
-  if (finite_map::isFmapVal(fmd)) {
-    LOG("fmap_transf",
-        errs() << "    ---> " << *mkSetDefCore(fmd, key, v) << "\n";);
+  if(finite_map::isFmapVal(fmd))
     return mkSetDefCore(fmd, key, v);
-  }
-
-  return finite_map::set(fmd, key, v);
+  else
+    return finite_map::set(fmd, key, v);
 }
 
 Expr mkIteDefCore(Expr cond, Expr fmd1, Expr fmd2) {
@@ -794,17 +776,12 @@ Expr mkIteDefCore(Expr cond, Expr fmd1, Expr fmd2) {
 
 Expr mkIteCore(Expr cond, Expr fm1, Expr fm2) {
 
-  LOG("fmap_transf", errs() << " ---- mkIteCore " << *cond << " " << *fm1
-                            << "\n " << *fm2 << "\n");
-
   Expr fmd1 = isOpX<ITE>(fm1)
                   ? mkIteCore(fm1->first(), fm1->right(), fm1->last())
                   : fm1;
   Expr fmd2 = isOpX<ITE>(fm2)
                   ? mkIteCore(fm2->first(), fm2->right(), fm2->last())
                   : fm2;
-  LOG("fmap_transf",
-      errs() << "    ---> " << *mkIteDefCore(cond, fmd1, fmd2) << "\n";);
   return mkIteDefCore(cond, fmd1, fmd2);
 }
 

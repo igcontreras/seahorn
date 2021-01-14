@@ -81,16 +81,7 @@ Expr SymStore::havoc(Expr key) {
         unsigned idx = variant::variantNum(bind::fname(bind::fname(v1))) + 1;
         val = finite_map::mkVal(key, idx);
       }
-    }
-    //     Expr d = finite_map::fmapDefDefault(val);
-    //     Expr fname = bind::fname(bind::fname(val));
-    //     fname = variant::mainVariant(fname);
-    //     val = at(key);
-    //     int idx = variant::variantNum(fname) + 1;
-    //     val = finite_map::mkVal(key, idx);
-    //   }
-    // }
-    else {
+    } else {
       // -- the usual case, either create a new value or update an old one
       val = at(key);
       Expr fdecl = val ? bind::fname(val) : bind::fname(key);
