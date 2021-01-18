@@ -81,11 +81,6 @@ static llvm::cl::opt<bool>
              llvm::cl::desc("Write to store instead of havoc"), cl::init(false),
              cl::Hidden);
 
-static llvm::cl::opt<bool>
-    ArrayUseWrite("horn-array-use-write",
-                  llvm::cl::desc("For arrays, write to store instead of havoc"),
-                  cl::init(false), cl::Hidden);
-
 static llvm::cl::opt<unsigned, true> MaxKeys(
     "horn-fmap-max-keys",
     llvm::cl::desc("Maximum number of different keys allowed in a finite map"),

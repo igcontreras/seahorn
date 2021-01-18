@@ -14,11 +14,6 @@
 #include "seahorn/Expr/ExprOpFiniteMap.hh"
 #include "seahorn/Expr/ExprOpVariant.hh"
 
-namespace seahorn {
-// flag for the maximum size of an fmap
-extern unsigned FmapsMaxKeys;
-} // namespace seahorn
-
 namespace {
 
 using namespace seadsa;
