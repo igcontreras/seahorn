@@ -101,12 +101,15 @@ public:
       return m_fcim[f][{c.getNode(), getOffset(c)}].m_nks;
   }
 
-  unsigned getMaxAlias(const Cell &c, const Function *f) {
+  unsigned getMaxAlias(const Node *n, unsigned offset, const Function *f) {
     assert(m_fcim.count(f) > 0);
-    if (m_fcim[f].count({c.getNode(), getOffset(c)}) == 0)
+    if (m_fcim[f].count({n, offset}) == 0)
       return 0;
     else
-      return m_fcim[f][{c.getNode(), getOffset(c)}].m_nacss;
+      return m_fcim[f][{n, offset}].m_nacss;
+  }
+  unsigned getMaxAlias(const Cell &c, const Function *f) {
+    return getMaxAlias(c.getNode(), getOffset(c), f);
   }
 
   unsigned getCINumKeysSummary(const Cell &c, const Function *f);

@@ -640,6 +640,8 @@ Expr mkGetDefCore(Expr fmd, Expr key) {
     if (!isOpX<FALSE>(cond)) {
       matches.push_back(i);
       conds.push_back(cond);
+      if(isOpX<TRUE>(cond))
+        break; // stop search, but keep the previous matches
     }
   }
 

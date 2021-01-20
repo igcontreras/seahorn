@@ -92,6 +92,16 @@ static llvm::cl::opt<unsigned, true> MaxAlias(
         "Maximum number of keys that may alias allowed in a finite map"),
     llvm::cl::location(seahorn::FmapsMaxAlias), cl::init(1));
 
+static llvm::cl::opt<bool> FMapsMemInit(
+    "horn-fmap-mem-init",
+    llvm::cl::desc("Preassign keys to offsets when there is aliasing"),
+    cl::init(false));
+
+static llvm::cl::opt<bool> FMapsProtect(
+    "horn-fmap-protect",
+    llvm::cl::desc("Protect fmaps in callsites with active literals"),
+    cl::init(true));
+
 static llvm::cl::opt<bool, true>
     FMNegCond("horn-fmap-neg-cond",
               llvm::cl::desc("Negate condition and swap th and el in ITEs in "
@@ -192,9 +202,6 @@ struct OpSemBase {
 
     if (!v)
       return;
-
-    // if (isOpX<EQ>(v))
-    //   assert(isOpX<EQ>(v) && !finite_map::returnsFiniteMap(v->left()));
 
     if (!GlobalConstraints || conditional)
       m_side.push_back(boolop::limp(m_activeLit, v));
@@ -806,7 +813,7 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
 
       if (F.getName().equals("shadow.mem.init")) {
         Expr mem = m_s.havoc(symb(I));
-        if (PF.getName().equals("main"))
+        if (PF.getName().equals("main") || FMapsMemInit)
           m_sem.execMemInit(CS, mem, m_side, m_s);
       } else if (F.getName().equals("shadow.mem.load")) {
         const Value &v = *CS.getArgument(1);
@@ -849,7 +856,8 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
         m_s.read(symb(*CS.getArgument(1)));
       } else if (!PF.getName().equals("main") &&
                  F.getName().equals("shadow.mem.arg.init")) {
-        // m_sem.execMemInit(CS, m_s.read(symb(I)), m_side, m_s);
+        if (FMapsMemInit)
+          m_sem.execMemInit(CS, m_s.read(symb(I)), m_side, m_s);
         // regions initialized in main are global. We want them to
         // flow to the arguments
         /* do nothing */
@@ -1769,9 +1777,9 @@ Expr FMapUfoOpSem::symb(const Value &I) {
           const Cell &c = opt_c.getValue();
           if (m_preproc->isSafeNodeFunc(*const_cast<Node *>(c.getNode()), F)) {
             unsigned nKs = m_preproc->getNumKeys(c, F);
-            if (nKs > 0 && // may be safe but not accessed
-                m_preproc->getMaxAlias(c, F) <= MaxAlias) {
-              // nKs <= MaxKeys) {
+            if ((nKs > 0) && // may be safe but not accessed
+                (m_preproc->getMaxAlias(c, F) <= MaxAlias) &&
+                (nKs <= MaxKeys)) {
               ExprVector &keys = m_preproc->getKeysCell(c, F);
               Expr intTy = sort::intTy(m_efac);
               return bind::mkConst(mkTerm<const Value *>(&I, m_efac),
@@ -1920,7 +1928,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
   auto addStore = [&](const Expr lhs, const Expr rhs, const Value *v) {
     if (OpSemVisitor::returnsArray(lhs))
       arrayStores.push_back(mk<EQ>(lhs, rhs));
-    else if (isTrueActiveLit)
+    else if (!FMapsProtect || isTrueActiveLit)
       s.write(symb(*v), rhs);
     else {
       assert(finite_map::returnsFiniteMap(rhs));
@@ -1966,7 +1974,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 
   ExprSet added; // stores the definitions already added
   for (auto &kv : extraDefs)
-    recInlineDefs(kv.first, kv.second, extraDefs, added, s);
+    recInlineDefs(kv.first, kv.second, extraDefs, added);
 
   auto r_it = fi.regions.begin();
   auto v_it = csi.m_regionValues.begin();
@@ -2072,7 +2080,7 @@ void FMapUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
 }
 
 void FMapUfoOpSem::recInlineDefs(const Expr map, const Expr def, ExprMap &defs,
-                                 ExprSet &added, SymStore &s) {
+                                 ExprSet &added) {
 
   if (added.count(map) > 0)
     return;
@@ -2088,11 +2096,11 @@ void FMapUfoOpSem::recInlineDefs(const Expr map, const Expr def, ExprMap &defs,
     if (d_it ==
         defs.end()) // defined earlier // TODO: this should not happen now
       continue;
-    recInlineDefs(mapd, d_it->second, defs, added, s);
+    recInlineDefs(mapd, d_it->second, defs, added);
   }
 
   Expr inlinedDef = fmap_transf::mkInlineDefs(def, defs);
-  defs[def] = inlinedDef;
+  defs[map] = inlinedDef;
 }
 
 Expr FMapUfoOpSem::fmVariant(Expr e, const Cell &c, const ExprVector &keys) {
@@ -2122,7 +2130,7 @@ void FMapUfoOpSem::recVCGenMem(const Cell &cCe, Expr basePtrIn, Expr basePtrOut,
 
   if ((m_preproc->isSafeNode(safeNodesCeSas, smCI.get(cCe).getNode())) &&
       // checking if the node is bounded context-insensitive
-      // (m_preproc->getNumCIKeysCellSummary(cCe, &F) <= MaxKeys)
+      (m_preproc->getCINumKeysSummary(cCe, &F) <= MaxKeys) &&
       (m_preproc->getCIMaxAliasSummary(cCe, &F) <= MaxAlias)) {
     // -- copy accessed fields of the node
     for (auto field : cCe.getNode()->types()) {
@@ -2350,11 +2358,17 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
     recCollectReachableKeys(c, F, argE, safeBU, safe, sm, ckm, nim);
   }
 
-  if (fi.ret) {
-    Expr retE = s.read(symb(*CS.getInstruction()));
-    if (buG.hasCell(*fi.ret)) {
-      const Cell &c = buG.getCell(*fi.ret);
-      recCollectReachableKeys(c, F, retE, safeBU, safe, sm, ckm, nim);
+  if (buG.hasRetCell(F)) {
+    // traverse all blocks to find return
+    for (auto const &bb : F.getBasicBlockList()) {
+      if (const ReturnInst *ret =
+              dyn_cast<const ReturnInst>(bb.getTerminator())) {
+        const Value &v = *ret->getReturnValue();
+        Expr retE = s.read(symb(v));
+        recCollectReachableKeys(buG.getCell(v), F, retE, safeBU, safe, sm, ckm,
+                                nim);
+        break;
+      }
     }
   }
 
@@ -2363,17 +2377,17 @@ void FMapUfoOpSem::execMemInit(CallSite &CS, Expr memE, ExprVector &side,
     auto c = kv.first; // pair of node and offset
     const Node *n = c.first;
     unsigned offset = c.second;
-    Expr memE = getExprCell(nim, n, offset);
-    assert(kv.second.size() > 0); // more than one key
-    defs[memE] = finite_map::constrainKeys(memE, kv.second);
-    LOG("fmaps_mem_init",
-        errs() << "def: " << *memE << ": " << *defs[memE] << "\n";);
+    if (m_preproc->getMaxAlias(n, offset, &F) > 1) {
+      Expr memE = getExprCell(nim, n, offset);
+      assert(kv.second.size() > 0); // more than one key
+      defs[memE] = finite_map::constrainKeys(memE, kv.second);
+    }
   }
 
   // add definitions in an ordered way
   ExprSet added;
   for (auto kv : defs)
-    recInlineDefs(kv.first, kv.second, defs, added, s);
+    recInlineDefs(kv.first, kv.second, defs, added);
   for (auto kv : defs)
     side.push_back(fmap_transf::mkSameKeysCore(kv.second));
 }
@@ -2392,7 +2406,7 @@ void FMapUfoOpSem::recCollectReachableKeys(const Cell &cBU, const Function &F,
 
   const Cell &cSAS = sm.get(cBU);
   if (m_preproc->isSafeNode(safeNs, cSAS.getNode()) &&
-      // (m_preproc->getNumKeys(cSAS, &F) <= MaxKeys)
+      (m_preproc->getNumKeys(cSAS, &F) <= MaxKeys) &&
       (m_preproc->getMaxAlias(cSAS, &F) <= MaxAlias))
     for (auto field : cBU.getNode()->types()) {
       unsigned offset = field.getFirst();

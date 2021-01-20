@@ -346,16 +346,13 @@ private:
                                CellKeysMap &nkm, CellExprMap &nim);
 
   void recInlineDefs(const Expr map, const Expr def, ExprMap &defs,
-                     ExprSet &added, SymStore &s);
+                     ExprSet &added);
   void storeSymInitInstruction(Instruction *I, CellExprMap &nim, Expr memE);
 
   CellKeysMap &getCellKeysFunction(const Function &F) {
     return m_fCellKeysM[&F]; // creates it if it doesn't exist
   }
 
-  // bool hasNodeSymFunction(const Function &F) {
-  //   return m_fInitSymNodes.count(&F) > 0;
-  // }
   CellExprMap &getNodeSymFunction(const Function &F) {
     return m_fInitSymNodes[&F]; // creates it if it
                                 // doesn't exist
