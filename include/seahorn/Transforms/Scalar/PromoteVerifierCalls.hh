@@ -19,14 +19,20 @@ namespace seahorn
     Function *m_assumeFn;
     Function *m_assertFn;
     Function *m_assertNotFn;
+    Function *m_synthAssumeFn;
+    Function *m_synthAssertFn;
     Function *m_errorFn;
     Function *m_failureFn; // to indicate failure. It can only appears in main.
     Function *m_is_deref;
     Function *m_assert_if;
     Function *m_is_modified;
     Function *m_reset_modified;
+    Function *m_is_read;
+    Function *m_reset_read;
+    Function *m_is_alloc;
     Function *m_tracking_on;
     Function *m_tracking_off;
+    Function *m_free;
 
     PromoteVerifierCalls() : ModulePass(ID) {}
 

@@ -1,6 +1,6 @@
 #pragma once
-#include "seahorn/OperationalSemantics.hh"
 #include "seahorn/Expr/Smt/EZ3.hh"
+#include "seahorn/OperationalSemantics.hh"
 
 namespace seahorn {
 class CpEdge;
@@ -22,8 +22,7 @@ class VCGen {
                                 const BasicBlock &bb, bool last = false);
 
   /// \brief Initialize SMT solver for eager VC checking
-  void initSmt(std::unique_ptr<EZ3> &zctx,
-               std::unique_ptr<ZSolver<EZ3>> &smt);
+  void initSmt(std::unique_ptr<EZ3> &zctx, std::unique_ptr<ZSolver<EZ3>> &smt);
 
   /// \brief Check consistency of side-condition up-to a given basic block
   ///
@@ -43,8 +42,7 @@ class VCGen {
   ///
   /// If the side-condition is unsat, FALSE is added to the
   /// side-condition
-  void checkSideAtEnd(unsigned &head, ExprVector &side,
-                      ZSolver<EZ3> &smt);
+  void checkSideAtEnd(unsigned &head, ExprVector &side, ZSolver<EZ3> &smt);
 
 public:
   VCGen(OperationalSemantics &sem) : m_sem(sem) {
@@ -57,16 +55,23 @@ public:
   /// assignment of \p side corresponds to an execution through
   /// the basic blocks in \p edge.
   ///
+  /// If \p includePhi is true, then the Phi nodes associated with \p edge.dst()
+  /// are included in \p side.
+  ///
   /// Modifies symbolic store \p s to represent the state at the end
   /// of the edge.
   virtual void genVcForCpEdgeLegacy(SymStore &s, const CpEdge &edge,
-                              ExprVector &side);
+                                    ExprVector &side, bool includePhi = true);
 
   /// \brief Computes VC for an edge in a cut-point graph
   ///
   /// Computes a Verification Condition (VC) for a cut-point graph edge \p edge.
   /// The computation affects the \p OpSemContext \p ctx. The final VC is
   /// accessible via \p ctx.side()
-  virtual void genVcForCpEdge(OpSemContext &ctx, const CpEdge &edge);
+  ///
+  /// If \p includePhi is true, then the Phi nodes associated with \p edge.dst()
+  /// are included in \p ctx.side().
+  virtual void genVcForCpEdge(OpSemContext &ctx, const CpEdge &edge,
+                              bool includePhi = true);
 };
 } // namespace seahorn

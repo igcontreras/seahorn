@@ -261,6 +261,9 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
   }
 
   void visitCmpInst(CmpInst &I) {
+    if (!m_sem.isTracked(I))
+      return;
+
     Expr lhs = havoc(I);
 
     const Value &v0 = *I.getOperand(0);
@@ -593,6 +596,9 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
   }
 
   void visitReturnInst(ReturnInst &I) {
+    if (!m_sem.isTracked(I))
+      return;
+
     // -- skip return argument of main
     if (I.getParent()->getParent()->getName().equals("main"))
       return;
@@ -602,6 +608,9 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
   }
 
   void visitBranchInst(BranchInst &I) {
+    if (!m_sem.isTracked(I))
+      return;
+
     if (I.isConditional())
       lookup(*I.getCondition());
   }
@@ -652,6 +661,9 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
   }
 
   void doExtCast(CastInst &I, bool is_signed = false) {
+    if (!m_sem.isTracked(I))
+      return;
+
     Expr lhs = havoc(I);
     const Value &v0 = *I.getOperand(0);
     Expr op0 = lookup(v0);
@@ -681,6 +693,9 @@ struct OpSemVisitor : public InstVisitor<OpSemVisitor>, OpSemBase {
 
     Instruction &I = *CS.getInstruction();
     BasicBlock &BB = *I.getParent();
+
+    if (!m_sem.isTracked(I))
+      return;
 
     // -- unknown/indirect function call
     if (!f) {
@@ -1241,6 +1256,9 @@ const Value &UfoOpSem::conc(Expr v) const {
 bool UfoOpSem::isTracked(const Value &v) const {
   const Value *scalar = nullptr;
 
+  if (!OperationalSemantics::isTracked(v))
+    return false;
+
   if (isa<UndefValue>(v))
     return false;
 
@@ -1266,8 +1284,8 @@ bool UfoOpSem::isTracked(const Value &v) const {
     return m_trackLvl >= PTR;
   }
 
-  // -- always track integer registers
-  return v.getType()->isIntegerTy();
+  // -- always track integer registers and void functions
+  return v.getType()->isIntegerTy() || v.getType()->isVoidTy();
 }
 
 bool UfoOpSem::isAbstracted(const Function &fn) {
@@ -1317,6 +1335,17 @@ void UfoOpSem::execBr(SymStore &s, const BasicBlock &src, const BasicBlock &dst,
   }
 }
 
+void UfoOpSem::execRange(SymStore &s, const llvm::BasicBlock::iterator begin,
+                         const llvm::BasicBlock::iterator end, ExprVector &side,
+                         Expr act) {
+  OpSemVisitor v(s, *this, side);
+  v.setActiveLit(act);
+  for (const auto &I : llvm::make_range(begin, end)) {
+    v.visit(const_cast<Instruction &>(I));
+  }
+  v.resetActiveLit();
+}
+
 // internal function only for debugging (avoids duplication of code)
 static void printCS(const CallSiteInfo &csi, const FunctionInfo &fi) {
   errs() << "Call instruction: " << *csi.m_cs.getInstruction() << "\n";
@@ -1345,9 +1374,11 @@ static void printCS(const CallSiteInfo &csi, const FunctionInfo &fi) {
 
 void UfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side, SymStore &s) {
 
-  const FunctionInfo &fi = getFunctionInfo(*csi.m_cs.getCalledFunction());
-
   Instruction &I = *csi.m_cs.getInstruction();
+  if (!isTracked(I))
+    return;
+
+  const FunctionInfo &fi = getFunctionInfo(*csi.m_cs.getCalledFunction());
 
   for (const Argument *arg : fi.args)
     csi.m_fparams.push_back(
@@ -1372,6 +1403,10 @@ void UfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side, SymStore &s) {
 
 void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
                                SymStore &s) {
+
+  Instruction &I = *csi.m_cs.getInstruction();
+  if (!isTracked(I))
+    return;
 
   const FunctionInfo &fi = getFunctionInfo(*csi.m_cs.getCalledFunction());
 
@@ -1429,10 +1464,10 @@ void MemUfoOpSem::execCallSite(CallSiteInfo &csi, ExprVector &side,
       if (init_params < g_im_stats.m_params_copied)
           g_im_stats.m_callsites_copied++;);
 
-  Instruction &I = *csi.m_cs.getInstruction();
+  // Instruction &I = *csi.m_cs.getInstruction();
 
   if (fi.ret) {
-    Expr retE = s.havoc(symb(*csi.m_cs.getInstruction()));
+    Expr retE = s.havoc(symb(I));
     csi.m_fparams.push_back(retE);
     if (calleeG.hasCell(*fi.ret)) {
       const Cell &c = calleeG.getCell(*fi.ret); // no

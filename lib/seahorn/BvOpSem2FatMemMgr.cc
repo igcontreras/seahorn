@@ -45,10 +45,12 @@ public:
     Expr v() const { return m_v; }
     Expr toExpr() const { return v(); }
     explicit operator Expr() const { return toExpr(); }
+    Expr getRaw() { return strct::extractVal(m_v, 0); }
   };
 
   using FatMemTag = MemoryFeatures::FatMem_tag;
   using TrackingTag = int;
+  using WideMemTag = int;
 
   /// Right now everything is an expression. In the future, we might have
   /// other types for PtrTy, such as a tuple of expressions
@@ -570,16 +572,16 @@ public:
     return strct::insertVal(p.v(), 1 + SlotIdx, data);
   }
 
-  Expr isDereferenceable(FatPtrTy p, Expr byteSz) {
-    LOG("opsem", WARN << "isDereferenceable() not implemented!\n");
-    return m_ctx.alu().getFalse();
-  }
-
   RawPtrTy getAddressable(FatPtrTy p) const { return mkRawPtr(p); }
 
   bool isPtrTyVal(Expr e) const {
     // struct with raw ptr + fat slots
-    return strct::isStructVal(e) && e->arity() <= (1 + g_maxFatSlots);
+    return e && strct::isStructVal(e) && e->arity() == (1 + g_maxFatSlots);
+  }
+
+  bool isMemVal(Expr e) const {
+    // struct with raw ptr + fat slots
+    return e && strct::isStructVal(e) && e->arity() == (1 + g_maxFatSlots);
   }
 };
 

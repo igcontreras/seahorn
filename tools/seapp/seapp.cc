@@ -8,6 +8,9 @@
 ///
 // SeaPP-- LLVM bitcode Pre-Processor for Verification
 ///
+
+#include "llvm_seahorn/InitializePasses.h"
+#include "llvm_seahorn/Transforms/IPO.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/Bitcode/BitcodeWriterPass.h"
 #include "llvm/IR/LLVMContext.h"
@@ -31,6 +34,9 @@
 
 #include "seahorn/InitializePasses.hh"
 #include "seahorn/Passes.hh"
+
+#include "seadsa/InitializePasses.hh"
+#include "seadsa/support/RemovePtrToInt.hh"
 
 #ifdef HAVE_LLVM_SEAHORN
 #include "llvm_seahorn/Transforms/Scalar.h"
@@ -250,6 +256,11 @@ static llvm::cl::opt<bool>
                      llvm::cl::desc("Promote bool loads to sgt"),
                      llvm::cl::init(true));
 
+static llvm::cl::opt<bool>
+    NondetInit("promote-nondet-undef",
+               llvm::cl::desc("Replace all undef with non-determinism"),
+               llvm::cl::init(true));
+
 static llvm::cl::opt<bool> StripDebug("strip-debug",
                                       llvm::cl::desc("Strip debug info"),
                                       llvm::cl::init(false));
@@ -370,6 +381,9 @@ int main(int argc, char **argv) {
   llvm::initializeDsaLibFuncInfoPass(Registry);
 
   llvm::initializeCompleteCallGraphPass(Registry);
+  llvm::initializeAnnotation2MetadataLegacyPass(Registry);
+
+  llvm::initializeRemovePtrToIntPass(Registry);
 
   // add an appropriate DataLayout instance for the module
   const llvm::DataLayout *dl = &module->getDataLayout();
@@ -380,6 +394,7 @@ int main(int argc, char **argv) {
 
   assert(dl && "Could not find Data Layout for the module");
 
+  pm_wrapper.add(llvm_seahorn::createAnnotation2MetadataLegacyPass());
   pm_wrapper.add(seahorn::createSeaBuiltinsWrapperPass());
 
   if (RenameNondet)
@@ -411,6 +426,8 @@ int main(int argc, char **argv) {
     pm_wrapper.add(seahorn::createPromoteMallocPass());
   } else if (CutLoops || PeelLoops > 0) {
     // -- cut loops to turn a program into loop-free program
+    assert(LowerSwitch && "Lower switch must be enabled");
+    pm_wrapper.add(llvm::createLowerSwitchPass());
     pm_wrapper.add(llvm::createLoopSimplifyPass());
     pm_wrapper.add(llvm::createLoopSimplifyCFGPass());
     pm_wrapper.add(llvm_seahorn::createLoopRotatePass(/*1023*/));
@@ -487,6 +504,7 @@ int main(int argc, char **argv) {
 
     // -- resolve indirect calls
     if (DevirtualizeFuncs) {
+      pm_wrapper.add(seadsa::createRemovePtrToIntPass());
       pm_wrapper.add(llvm::createWholeProgramDevirtPass(nullptr, nullptr));
       pm_wrapper.add(seahorn::createDevirtualizeFunctionsPass());
     }
@@ -507,8 +525,10 @@ int main(int argc, char **argv) {
 
     // -- SSA
     pm_wrapper.add(llvm::createPromoteMemoryToRegisterPass());
-    // -- Turn undef into nondet
-    pm_wrapper.add(seahorn::createNondetInitPass());
+
+    if (NondetInit)
+      // -- Turn undef into nondet
+      pm_wrapper.add(seahorn::createNondetInitPass());
 
     // -- Promote memcpy to loads-and-stores for easier alias analysis.
     pm_wrapper.add(seahorn::createPromoteMemcpyPass());
@@ -523,9 +543,10 @@ int main(int argc, char **argv) {
     //     SROA_Threshold, true, SROA_StructMemThreshold,
     //     SROA_ArrayElementThreshold, SROA_ScalarLoadThreshold));
     pm_wrapper.add(llvm::createSROAPass());
-    // -- Turn undef into nondet (undef are created by SROA when it calls
-    //     mem2reg)
-    pm_wrapper.add(seahorn::createNondetInitPass());
+    if (NondetInit)
+      // -- Turn undef into nondet (undef are created by SROA when it calls
+      //     mem2reg)
+      pm_wrapper.add(seahorn::createNondetInitPass());
 
     // -- cleanup after break aggregates
     pm_wrapper.add(seahorn::createInstCombine());

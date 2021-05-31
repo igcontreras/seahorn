@@ -40,6 +40,8 @@ protected:
   EZ3 &m_zctx;
   ExprFactory &m_efac;
 
+  llvm::Function *m_synthAssertFn = nullptr;
+
   /// whether encoding is inter-procedural (i.e., with summaries)
   bool m_interproc;
   /// whether encoding is inter-procedural with finite maps
@@ -47,6 +49,9 @@ protected:
   ShadowMemPass *m_smp = nullptr;
 
   void extractFunctionInfo(const BasicBlock &BB);
+
+  llvm::SmallVector<llvm::CallInst *, 8> getPartialFnsToSynth(Function &F);
+  void expandEdgeFilter(const llvm::Instruction &I);
 
 public:
   HornifyFunction(HornifyModule &parent, bool interproc = false,
@@ -64,6 +69,7 @@ public:
 };
 
 class SmallHornifyFunction : public HornifyFunction {
+  void mkBBSynthRules(const LiveSymbols &ls, Function &F, SymStore &store);
 
 public:
   SmallHornifyFunction(HornifyModule &parent, bool interproc = false)
@@ -73,6 +79,10 @@ public:
 };
 
 class LargeHornifyFunction : public HornifyFunction {
+  bool mkEdgeSynthRules(const LiveSymbols &ls, const CallInst &partial,
+                        const CpEdge &edge, BasicBlock &target, VCGen &vcgen,
+                        SymStore &store);
+
 public:
   LargeHornifyFunction(HornifyModule &parent, bool interproc = false,
                        bool interprocFmaps = false)

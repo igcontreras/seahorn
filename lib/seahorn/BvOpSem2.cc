@@ -453,6 +453,24 @@ public:
     }
 
     setValue(I, addr);
+
+    if (!m_ctx.getMemReadRegister() || !m_ctx.getMemWriteRegister()) {
+      LOG("opsem",
+          ERR << "No read/write register found - check if corresponding"
+                 " shadow instruction is present.");
+      m_ctx.setMemReadRegister(Expr());
+      m_ctx.setMemWriteRegister(Expr());
+      return;
+    }
+
+    // TODO: check that addr is valid
+    auto memIn = m_ctx.read(m_ctx.getMemReadRegister());
+    OpSemMemManager &memManager = m_ctx.mem();
+    auto res = memManager.setMetadata(MetadataKind::ALLOC, addr, memIn, 1);
+    m_ctx.write(m_ctx.getMemWriteRegister(), res);
+
+    m_ctx.setMemReadRegister(Expr());
+    m_ctx.setMemWriteRegister(Expr());
   }
 
   void visitLoadInst(LoadInst &I) {
@@ -569,12 +587,20 @@ public:
         visitIsModified(CS);
       } else if (f->getName().startswith("sea.reset_modified")) {
         visitResetModified(CS);
+      } else if (f->getName().startswith("sea.is_read")) {
+        visitIsRead(CS);
+      } else if (f->getName().startswith("sea.reset_read")) {
+        visitResetRead(CS);
+      } else if (f->getName().startswith("sea.is_alloc")) {
+        visitIsAlloc(CS);
       } else if (f->getName().startswith("sea.reset_modified")) {
         visitResetModified(CS);
       } else if (f->getName().startswith("sea.tracking_on")) {
         visitSetTrackingOn(CS);
       } else if (f->getName().startswith(("sea.tracking_off"))) {
         visitSetTrackingOff(CS);
+      } else if (f->getName().startswith("sea.free")) {
+        visitFree(CS);
       } else if (f->getName().startswith(("sea.assert.if"))) {
         visitSeaAssertIfCall(CS);
       } else if (f->getName().startswith(("verifier.assert"))) {
@@ -640,7 +666,7 @@ public:
 
     IntegerType *Ty =
         dyn_cast<IntegerType>(cast<CallInst>(CS.getInstruction())->getType());
-    if (!Ty || Ty->getBitWidth() % 16 != 0 || CS.getNumArgOperands() > 1) {
+    if ((Ty && Ty->getBitWidth() % 16 != 0) || CS.getNumArgOperands() > 1) {
       LOG("opsem",
           ERR << "Cannot handle inline assembly: " << *CS.getInstruction());
       return;
@@ -655,6 +681,9 @@ public:
           ERR << "Cannot handle inline assembly: " << *CS.getInstruction());
       break;
     case 0:
+      // This part handles the following type of inline assembly
+      // The other switch cases are handling integer bswap only
+      // 1. read memory value (data), the type of value is not restricted
       if (IA->getConstraintString().compare(0, 5, "=r,0,") == 0) {
         // Copy input to output
         Expr readVal = lookup(*CS.getArgument(0));
@@ -664,7 +693,8 @@ public:
         // Since there is no computation, do nothing
       } else {
         LOG("opsem",
-            ERR << "Cannot handle inline assembly: " << *CS.getInstruction());
+            ERR << "Cannot handle inline assembly with empty asm string: "
+                << *CS.getInstruction());
       }
       break;
     case 1:
@@ -725,7 +755,7 @@ public:
     Expr ptr = lookup(*CS.getArgument(0));
     auto memIn = m_ctx.read(m_ctx.getMemReadRegister());
     OpSemMemManager &memManager = m_ctx.mem();
-    auto res = memManager.isModified(ptr, memIn);
+    auto res = memManager.isMetadataSet(MetadataKind::WRITE, ptr, memIn);
     setValue(*CS.getInstruction(), res);
     m_ctx.setMemReadRegister(Expr());
   }
@@ -742,16 +772,54 @@ public:
     Expr ptr = lookup(*CS.getArgument(0));
     auto memIn = m_ctx.read(m_ctx.getMemReadRegister());
     OpSemMemManager &memManager = m_ctx.mem();
-    auto res = memManager.resetModified(ptr, memIn);
+    auto res = memManager.setMetadata(MetadataKind::WRITE, ptr, memIn, 0);
     m_ctx.write(m_ctx.getMemWriteRegister(), res);
 
     m_ctx.setMemReadRegister(Expr());
     m_ctx.setMemWriteRegister(Expr());
   }
 
+  void visitIsRead(CallSite CS) {}
+
+  void visitResetRead(CallSite CS) {}
+
+  void visitIsAlloc(CallSite CS) {
+    if (!m_ctx.getMemReadRegister()) {
+      LOG("opsem", ERR << "No read register found - check if corresponding"
+                          "shadow instruction is present.");
+      m_ctx.setMemReadRegister(Expr());
+      return;
+    }
+    Expr ptr = lookup(*CS.getArgument(0));
+    auto memIn = m_ctx.read(m_ctx.getMemReadRegister());
+    OpSemMemManager &memManager = m_ctx.mem();
+    auto res = memManager.isMetadataSet(MetadataKind::ALLOC, ptr, memIn);
+    setValue(*CS.getInstruction(), res);
+    m_ctx.setMemReadRegister(Expr());
+  }
+
   void visitSetTrackingOn(CallSite CS) { m_ctx.setTracking(true); }
 
   void visitSetTrackingOff(CallSite CS) { m_ctx.setTracking(false); }
+
+  void visitFree(CallSite &CS) {
+    if (!m_ctx.getMemReadRegister() || !m_ctx.getMemWriteRegister()) {
+      LOG("opsem",
+          ERR << "No read/write register found - check if corresponding"
+                 "shadow instruction is present.");
+      m_ctx.setMemReadRegister(Expr());
+      m_ctx.setMemWriteRegister(Expr());
+      return;
+    }
+    Expr ptr = lookup(*CS.getArgument(0));
+    auto memIn = m_ctx.read(m_ctx.getMemReadRegister());
+    OpSemMemManager &memManager = m_ctx.mem();
+    auto res = memManager.setMetadata(MetadataKind::ALLOC, ptr, memIn, 0);
+    m_ctx.write(m_ctx.getMemWriteRegister(), res);
+
+    m_ctx.setMemReadRegister(Expr());
+    m_ctx.setMemWriteRegister(Expr());
+  }
 
   /// Report outcome of vacuity and incremental assertion checking
   void reportDoAssert(char *tag, const Instruction &I, boost::tribool res,
@@ -1929,6 +1997,26 @@ public:
   Expr executeStoreInst(const Value &val, const Value &addr, unsigned alignment,
                         Bv2OpSemContext &ctx) {
 
+    // -- fn to update ctx in case the store operation is treated as a noop
+    auto noop = [&ctx]() {
+      Expr res = ctx.read(ctx.getMemReadRegister());
+      ctx.write(ctx.getMemWriteRegister(), res);
+      ctx.setMemReadRegister(Expr());
+      ctx.setMemWriteRegister(Expr());
+      return res;
+    };
+
+    if (val.getType()->isDoubleTy() || val.getType()->isFloatTy()) {
+      if (ctx.getMemReadRegister() && ctx.getMemWriteRegister()) {
+        LOG("opsem", WARN << "treating double/float store as noop: *" << addr
+                          << " := " << val << "\n";);
+
+        return noop();
+      }
+      // if anything above fails, continue as usual. Exceptional cases are
+      // treated as memhavoc below.
+    }
+
     if (!ctx.getMemReadRegister() || !ctx.getMemWriteRegister() ||
         m_sem.isSkipped(val)) {
       LOG("opsem",
@@ -1936,6 +2024,12 @@ public:
       ctx.setMemReadRegister(Expr());
       ctx.setMemWriteRegister(Expr());
       return Expr();
+    }
+
+    if (isa<UndefValue>(val)) {
+      // from LLVM Lang Ref:
+      // A store of an undefined value can be assumed to not have any effect;
+      return noop();
     }
 
     Expr v = lookup(val);
@@ -2101,6 +2195,10 @@ public:
                           << gv.getName(););
         continue;
       }
+      if (gv.getName().equals("llvm.global_ctors") ||
+          gv.getName().equals("llvm.global_dtors")) {
+        continue;
+      }
       Expr symReg = m_ctx.mkRegister(gv);
       assert(symReg);
       setValue(gv, m_ctx.mem().galloc(gv));
@@ -2113,6 +2211,10 @@ public:
         continue;
       if (gv.getSection().equals("llvm.metadata"))
         continue;
+      if (gv.getName().equals("llvm.global_ctors") ||
+          gv.getName().equals("llvm.global_dtors")) {
+        continue;
+      }
       m_ctx.mem().initGlobalVariable(gv);
     }
 
@@ -2535,7 +2637,12 @@ Expr Bv2OpSemContext::mkRegister(const llvm::Value &v) {
 
 Expr Bv2OpSemContext::getConstantValue(const llvm::Constant &c) {
   // -- easy common cases
-  if (isa<ConstantPointerNull>(&c)) {
+  if (false && isa<const UndefValue>(c)) {
+    // XXX causes issues with structures, disable for now
+    // -- `undef` is an arbitrary bit-pattern, so we treat it as 0
+    return alu().ui(0U, m_sem.sizeInBits(c));
+  } else if (isa<ConstantPointerNull>(c) ||
+             (c.getType()->isPointerTy() && isa<UndefValue>(c))) {
     return mem().nullPtr();
   } else if (const ConstantInt *ci = dyn_cast<const ConstantInt>(&c)) {
     if (ci->getType()->isIntegerTy(1))
@@ -2602,6 +2709,8 @@ void Bv2OpSemContext::addToSolver(const Expr e) {
 boost::tribool Bv2OpSemContext::solve() { return m_z3_solver->solve(); }
 
 Expr Bv2OpSemContext::ptrToAddr(Expr p) { return mem().ptrToAddr(p); }
+
+Expr Bv2OpSemContext::getRawMem(Expr p) { return mem().getRawMem(p); }
 
 } // namespace details
 
@@ -2739,6 +2848,20 @@ Expr Bv2OpSem::getOperandValue(const Value &v,
       res = ctx.read(reg);
     } else
       res = ctx.getConstantValue(*gv);
+  } else if (auto *ce = dyn_cast<ConstantExpr>(&v)) {
+    // HACK: handle bitcast of a global variable
+    if (ce->getType()->isPointerTy() &&
+        ce->getOpcode() == Instruction::BitCast) {
+      if (auto *gv = dyn_cast<GlobalVariable>(ce->getOperand(0))) {
+        if (Expr reg = ctx.getRegister(*gv))
+          res = ctx.read(reg);
+      }
+    }
+    if (!res) {
+      res = ctx.getConstantValue(*ce);
+      LOG("opsem",
+          if (!res) WARN << "Failed to evaluate constant expression " << v;);
+    }
   } else if (auto *cv = dyn_cast<Constant>(&v)) {
     res = ctx.getConstantValue(*cv);
     LOG("opsem", if (!res) WARN << "Failed to evaluate a constant " << v;);

@@ -5,6 +5,7 @@
 #include "seahorn/Support/CFG.hh"
 #include "seahorn/Support/ExprSeahorn.hh"
 #include "seahorn/Support/Stats.hh"
+#include "seahorn/Transforms/Instrumentation/GeneratePartialFnPass.hh"
 
 #include "seahorn/Support/SeaDebug.h"
 #include "llvm/Support/CommandLine.h"
@@ -29,10 +30,7 @@ static llvm::cl::opt<bool>
 namespace seahorn {
 
 void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
-  const ReturnInst *ret = dyn_cast<const ReturnInst>(BB.getTerminator());
-  // not an exit block
-  if (!ret)
-    return;
+  // --- Checks if the function requires a summary.
 
   const Function &F = *BB.getParent();
 
@@ -41,7 +39,77 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
     return;
   }
 
+  const ReturnInst *ret = dyn_cast<const ReturnInst>(BB.getTerminator());
+  // not an exit block
+  if (!ret)
+    return;
+
+  // --- The properties of BB determine what arguments it requires. The
+  // following lambdas factor out routines for argument extraction so that they
+  // can be conditionally enabled, based on BB.
+
+  // Appends arguments to sorts for memory regions in fi.
+  auto computeArgumentsFromMemoryRegions = [&](FunctionInfo &fi,
+                                               ExprVector &sorts) {
+    for (const Instruction &inst : BB) {
+      if (const CallInst *ci = dyn_cast<const CallInst>(&inst)) {
+        CallSite CS(const_cast<CallInst *>(ci));
+        const Function *cf = CS.getCalledFunction();
+        if (cf && (cf->getName().equals("shadow.mem.in") ||
+                   cf->getName().equals("shadow.mem.out"))) {
+          const Value &v = *CS.getArgument(1);
+          Expr r = m_sem.symb(v);
+          if (!r)
+            continue;
+          fi.regions.push_back(&v);
+          sorts.push_back(bind::typeOf(r));
+        }
+      }
+    }
+  };
+
+  // Appends arguments to sorts for arguments in fi.
+  auto computeArgumentsFromDeclaration = [&](FunctionInfo &fi,
+                                             ExprVector &sorts,
+                                             bool filterForLiveness) {
+    const ExprVector &live = m_parent.live(BB);
+    for (const Argument &arg : F.args()) {
+      if (filterForLiveness && !m_sem.isTracked(arg))
+        continue;
+      Expr v = m_sem.symb(arg);
+      if (!v)
+        continue;
+
+      if (filterForLiveness && !std::binary_search(live.begin(), live.end(), v))
+        continue;
+
+      fi.args.push_back(&arg);
+      sorts.push_back(bind::typeOf(v));
+    }
+  };
+
+  // Appends arguments to sorts for globals.
+  auto computeArgumentsFromGlobals = [&](FunctionInfo &fi, ExprVector &sorts) {
+    const ExprVector &live = m_parent.live(BB);
+    for (Expr v : live) {
+      Expr u = bind::fname(bind::fname(v));
+      if (!isOpX<VALUE>(u))
+        continue;
+
+      const Value *val = getTerm<const Value *>(u);
+      if (!m_sem.isTracked(*val))
+        continue;
+      if (const GlobalVariable *gv = dyn_cast<const GlobalVariable>(val)) {
+        fi.globals.push_back(gv);
+        sorts.push_back(bind::typeOf(v));
+      }
+    }
+  };
+
+  /// --- Performs argument extraction.
+
   FunctionInfo &fi = m_sem.getFunctionInfo(F);
+  fi.isInferable = isInferable(F);
 
   // reserved arguments:
   //  1. enabled flag
@@ -50,54 +118,12 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
   Expr boolSort = sort::boolTy(m_efac);
   ExprVector sorts{boolSort, boolSort, boolSort};
 
-  // memory regions
-  for (const Instruction &inst : BB) {
-    if (const CallInst *ci = dyn_cast<const CallInst>(&inst)) {
-      CallSite CS(const_cast<CallInst *>(ci));
-      const Function *cf = CS.getCalledFunction();
-      if (cf && (cf->getName().equals("shadow.mem.in") ||
-                 cf->getName().equals("shadow.mem.out"))) {
-        const Value &v = *CS.getArgument(1);
-        Expr r = m_sem.symb(v);
-        if (!r)
-          continue;
-        fi.regions.push_back(&v);
-        sorts.push_back(bind::typeOf(r));
-      }
-    }
-  }
-
-  const ExprVector &live = m_parent.live(BB);
-
-  // live arguments
-  for (const Argument &arg :
-       boost::make_iterator_range(F.arg_begin(), F.arg_end())) {
-    if (!m_sem.isTracked(arg))
-      continue;
-    Expr v = m_sem.symb(arg);
-    if (!v)
-      continue;
-
-    if (!std::binary_search(live.begin(), live.end(), v))
-      continue;
-
-    fi.args.push_back(&arg);
-    sorts.push_back(bind::typeOf(v));
-  }
-
-  // live globals
-  for (Expr v : live) {
-    Expr u = bind::fname(bind::fname(v));
-    if (!isOpX<VALUE>(u))
-      continue;
-
-    const Value *val = getTerm<const Value *>(u);
-    if (!m_sem.isTracked(*val))
-      continue;
-    if (const GlobalVariable *gv = dyn_cast<const GlobalVariable>(val)) {
-      fi.globals.push_back(gv);
-      sorts.push_back(bind::typeOf(v));
-    }
+  if (fi.isInferable) {
+    computeArgumentsFromDeclaration(fi, sorts, false);
+  } else {
+    computeArgumentsFromMemoryRegions(fi, sorts);
+    computeArgumentsFromDeclaration(fi, sorts, true);
+    computeArgumentsFromGlobals(fi, sorts);
   }
 
   // return value
@@ -115,6 +141,8 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
   fi.sumPred = bind::fdecl(mkTerm<const Function *>(&F, m_efac), sorts);
 
   m_db.registerRelation(fi.sumPred);
+
+  // --- Generates function summaries.
 
   // basic rules
   // if error.flag is on, it remains on, even if S is disabled
@@ -141,14 +169,135 @@ void HornifyFunction::extractFunctionInfo(const BasicBlock &BB) {
   postArgs[2] = falseE;
   m_db.addRule(allVars, bind::fapp(fi.sumPred, postArgs));
 
-  // -- expose basic properties of the summary
-  postArgs[0] = bind::boolConst(mkTerm(std::string("arg.0"), m_efac));
-  postArgs[1] = bind::boolConst(mkTerm(std::string("arg.1"), m_efac));
-  postArgs[2] = bind::boolConst(mkTerm(std::string("arg.2"), m_efac));
-  m_db.addConstraint(
-      bind::fapp(fi.sumPred, postArgs),
-      mk<AND>(mk<OR>(postArgs[0], mk<EQ>(postArgs[1], postArgs[2])),
-              mk<OR>(mk<NEG>(postArgs[0]), mk<NEG>(postArgs[1]), postArgs[2])));
+  auto addRuleForBasicSummaryProperties = [&]() {
+    postArgs[0] = bind::boolConst(mkTerm(std::string("arg.0"), m_efac));
+    postArgs[1] = bind::boolConst(mkTerm(std::string("arg.1"), m_efac));
+    postArgs[2] = bind::boolConst(mkTerm(std::string("arg.2"), m_efac));
+    m_db.addConstraint(
+        bind::fapp(fi.sumPred, postArgs),
+        mk<AND>(
+            mk<OR>(postArgs[0], mk<EQ>(postArgs[1], postArgs[2])),
+            mk<OR>(mk<NEG>(postArgs[0]), mk<NEG>(postArgs[1]), postArgs[2])));
+  };
+  if (!fi.isInferable)
+    addRuleForBasicSummaryProperties();
+}
+
+llvm::SmallVector<llvm::CallInst *, 8>
+HornifyFunction::getPartialFnsToSynth(Function &F) {
+  // Gets reference to sea.synth.assert.
+  if (!m_synthAssertFn) {
+    auto &SBI = m_parent.getSBI();
+    auto &M = (*F.getParent());
+    m_synthAssertFn = SBI.mkSeaBuiltinFn(SeaBuiltinsOp::SYNTH_ASSERT, M);
+  }
+
+  // Records all functions passed to sea.synth.assert within BB.
+  llvm::SmallVector<llvm::CallInst *, 8> partials;
+  for (auto user : m_synthAssertFn->users()) {
+    if (auto CI = dyn_cast<CallBase>(user)) {
+      // Filters out calls that are in other blocks from the module.
+      if (CI->getParent()->getParent() == &F) {
+        auto *partial = dyn_cast<CallInst>(CI->getArgOperand(0));
+        partials.push_back(partial);
+        assert(partial);
+        assert(partial->getCalledFunction()->getReturnType());
+        assert(partial->getCalledFunction()->getReturnType()->isIntegerTy(1));
+      }
+    }
+  }
+
+  return partials;
+}
+
+void HornifyFunction::expandEdgeFilter(const llvm::Instruction &I) {
+  m_sem.addToFilter(I);
+  if (!isa<PHINode>(&I)) {
+    // An instruction can depend on instructions from prior blocks. If the prior
+    // instructions are not added to the filter, then the operation semantics
+    // may encounter an undefined value. Therefore, they are added to the
+    // filter.
+    //
+    // Note that it is not safe to include the operands of PHI nodes, and that
+    // omitting PHI nodes is safe. If a block is recursive, then the PHI node
+    // may depend on a "future" instruction from further into the block.
+    // Furthermore, a PHI node is implemented using argument passing within the
+    // CHCs, and therefore, the operands do not appear in the edge's transition
+    // relation.
+    for (auto &operand : I.operands()) {
+      auto v = operand.get();
+      if (isa<Instruction>(v))
+        m_sem.addToFilter(*v);
+    }
+  }
+}
+
+void SmallHornifyFunction::mkBBSynthRules(const LiveSymbols &ls, Function &F,
+                                          SymStore &store) {
+  // Finds all instances of sea.synth.assert in F. Only the basis blocks that
+  // make use of sea.synth.assert will be analyzed.
+  auto partials = getPartialFnsToSynth(F);
+  if (partials.empty())
+    return;
+
+  // Generates a rule for each assertion. Note that the order of instructions in
+  // partials may not agree with the order of instructions in BB. This is due to
+  // the order of users returned by Value::users().
+  for (auto *partial : partials) {
+    auto &BB = (*partial->getParent());
+
+    // Searches for a matching instruction.
+    bool found = false;
+    for (auto itr = BB.begin(); itr != BB.end(); ++itr) {
+      auto &I = (*itr);
+
+      found = (partial == &I);
+      if (found) {
+        const ExprVector &live = ls.live(&BB);
+
+        ExprSet vars;
+        for (const Expr &v : live)
+          vars.insert(store.read(v));
+
+        Expr pre = store.eval(bind::fapp(m_parent.bbPredicate(BB), live));
+
+        // Generates the VC for all instructions up to, but not including, I.
+        // Remark: If I == BB.begin(), then the filter is empty.
+        ExprVector lhs;
+        lhs.push_back(boolop::lneg((store.read(m_sem.errorFlag(BB)))));
+        if (itr != BB.begin())
+          m_sem.exec(store, BB, lhs, mk<TRUE>(m_efac));
+
+        // Assembles the function call associated with I.
+        // TODO: improve robustness; exec on I must produce a single term.
+        ExprVector rhs;
+        expandEdgeFilter(I);
+        m_sem.execRange(store, itr, std::next(itr), rhs, mk<TRUE>(m_efac));
+        assert(rhs.size() == 1);
+        Expr post = rhs.back();
+
+        // Assume a-priori that the partial function call returns true.
+        // This must came after rhs, else there can be two rv's for I.
+        auto rv = m_sem.lookup(store, I);
+        lhs.push_back(mk<EQ>(rv, mk<TRUE>(m_efac)));
+        Expr tau = mknary<AND>(mk<TRUE>(m_efac), lhs);
+
+        expr::filter(tau, bind::IsConst(), std::inserter(vars, vars.begin()));
+        expr::filter(post, bind::IsConst(), std::inserter(vars, vars.begin()));
+
+        auto rule = boolop::limp(boolop::land(pre, tau), post);
+        LOG("seahorn", errs() << "Adding synthesis rule: " << (*rule) << "\n";);
+        m_db.addRule(vars, rule);
+
+        store.clear();
+        m_sem.resetFilter();
+        break;
+      }
+
+      expandEdgeFilter(I);
+    }
+    assert(found);
+  }
 }
 
 void SmallHornifyFunction::runOnFunction(Function &F) {
@@ -178,6 +327,14 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
     // -- also constructs summary predicates
     if (m_interproc)
       extractFunctionInfo(BB);
+  }
+
+  // If F is an partial function stub, it should not have a body.
+  const FunctionInfo &fi = m_sem.getFunctionInfo(F);
+  if (fi.isInferable) {
+    LOG("seahorn", errs() << "Omitting body of partial fn stub: "
+                          << F.getName().str() << "\n");
+    return;
   }
 
   BasicBlock &entry = F.getEntryBlock();
@@ -232,6 +389,9 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
   side.clear();
   s.reset();
 
+  // Generates rules for synthesis.
+  mkBBSynthRules(ls, F, s);
+
   // Add error flag exit rules
   // bb (err, V) & err -> bb_exit (err , V)
   assert(exit);
@@ -275,7 +435,6 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
 
     Expr falseE = mk<FALSE>(m_efac);
     ExprVector postArgs{mk<TRUE>(m_efac), falseE, falseE};
-    const FunctionInfo &fi = m_sem.getFunctionInfo(F);
     evalArgs(fi, m_sem, s, std::back_inserter(postArgs));
     // -- use a mutable gate to put everything together
     expr::filter(mknary<OUT_G>(postArgs), bind::IsConst(),
@@ -292,6 +451,108 @@ void SmallHornifyFunction::runOnFunction(Function &F) {
     m_db.addRule(allVars, boolop::limp(pre, post));
   } else if (!exit & m_interproc)
     assert(0);
+}
+
+namespace {
+
+/// \brief Returns all successor edges of \p cp that contain the basic block
+/// \c target between the source and destination (inclusively).
+llvm::SmallVector<const CpEdge *, 8>
+filterCpEdgesByBB(const CutPoint &cp, llvm::BasicBlock &target) {
+  llvm::SmallVector<const CpEdge *, 8> matchingEdges;
+  for (auto *e : llvm::make_range(cp.succ_begin(), cp.succ_end())) {
+    for (auto &BB : *e) {
+      if (&BB == &target) {
+        matchingEdges.push_back(e);
+        break;
+      }
+    }
+  }
+  return matchingEdges;
+}
+
+} // namespace
+
+bool LargeHornifyFunction::mkEdgeSynthRules(const LiveSymbols &ls,
+                                            const CallInst &partial,
+                                            const CpEdge &edge,
+                                            BasicBlock &target, VCGen &vcgen,
+                                            SymStore &store) {
+  for (auto &BB : edge) {
+    if (&BB == &target)
+      break;
+    for (auto &I : BB)
+      expandEdgeFilter(I);
+  }
+
+  // Uses iterators rather than `for (auto I : target)` since an iterator is
+  // required by execRange.
+  const BasicBlock &source = edge.source().bb();
+  const ExprVector &live = ls.live(&source);
+  for (auto itr = target.begin(), end = target.end(); itr != end; ++itr) {
+    auto &I = (*itr);
+
+    if (&partial == &I) {
+      // The cut points `src` and `dst` should not appear in `cpg` as they are
+      // temporary. For this reason, the CP's are minimally initialized for use
+      // by `genVcForCpEdgeLegacy`. Note that at the time of writing this code,
+      // `genVcForCpEdgeLegacy` relies only on `src.id()`, `src.bb()`, and
+      // `dst.bb()`.
+      CutPoint src(edge.parent(), edge.source().id(), source);
+      CutPoint dst(edge.parent(), 0, target);
+      CpEdge truncatedEdge(src, dst);
+      for (auto &BB : edge) {
+        truncatedEdge.push_back(&BB);
+        if (&BB == &dst.bb())
+          break;
+      }
+
+      ExprSet vars;
+      ExprVector args;
+      for (const Expr &v : live)
+        args.push_back(store.read(v));
+      vars.insert(args.begin(), args.end());
+
+      Expr pre = bind::fapp(m_parent.bbPredicate(source), args);
+
+      // Generates the VC for all instructions up to, but not including, I.
+      ExprVector lhs;
+      bool isFirstBlock = (&*truncatedEdge.begin() == &target);
+      lhs.push_back(boolop::lneg((store.read(m_sem.errorFlag(source)))));
+      if (!isFirstBlock || (itr != target.begin()))
+        vcgen.genVcForCpEdgeLegacy(store, truncatedEdge, lhs, false);
+
+      // Assembles the function call associated with I.
+      ExprVector rhs;
+      expandEdgeFilter(I);
+      m_sem.execRange(store, itr, std::next(itr), rhs, mk<TRUE>(m_efac));
+      assert(rhs.size() == 1);
+      Expr post = rhs.back();
+
+      // Asserts that the intermediate block is reached.
+      if (!isFirstBlock)
+        lhs.push_back(store.read(m_sem.symb(target)));
+
+      // Assume a-priori that the partial function call returns true.
+      // This must came after rhs, else there can be two rv's for I.
+      auto rv = m_sem.lookup(store, I);
+      lhs.push_back(mk<EQ>(rv, mk<TRUE>(m_efac)));
+      Expr tau = mknary<AND>(mk<TRUE>(m_efac), lhs);
+
+      expr::filter(tau, bind::IsConst(), std::inserter(vars, vars.begin()));
+      expr::filter(post, bind::IsConst(), std::inserter(vars, vars.begin()));
+
+      auto rule = boolop::limp(boolop::land(pre, tau), post);
+      LOG("seahorn", errs() << "Adding synthesis rule: " << (*rule) << "\n";);
+      m_db.addRule(vars, rule);
+
+      return true;
+    }
+
+    expandEdgeFilter(I);
+  }
+
+  return false;
 }
 
 void LargeHornifyFunction::runOnFunction(Function &F) {
@@ -318,6 +579,13 @@ void LargeHornifyFunction::runOnFunction(Function &F) {
     m_db.registerRelation(decl);
     if (m_interproc)
       extractFunctionInfo(cp.bb());
+  }
+
+  const FunctionInfo &fi = m_sem.getFunctionInfo(F);
+  if (fi.isInferable) {
+    LOG("seahorn", errs() << "Omitting body of partial fn stub: "
+                          << F.getName().str() << "\n");
+    return;
   }
 
   const BasicBlock &entry = F.getEntryBlock();
@@ -487,6 +755,24 @@ void LargeHornifyFunction::runOnFunction(Function &F) {
     m_db.addRule(allVars, boolop::limp(pre, post));
   }
 
+  // Generates synthesis rules for each call to sea.synth.assert.
+  s.reset();
+  for (auto partial : getPartialFnsToSynth(F)) {
+    for (auto &cp : cpg) {
+      auto &srcBB = cp.bb();
+      if (reached.count(&srcBB) <= 0)
+        continue;
+
+      auto &targetBB = (*partial->getParent());
+      for (auto *e : filterCpEdgesByBB(cp, targetBB)) {
+        bool success = mkEdgeSynthRules(ls, *partial, *e, targetBB, vcgen, s);
+        assert(success);
+        s.reset();
+        m_sem.resetFilter();
+      }
+    }
+  }
+
   if (F.getName().equals("main") && ls.live(exit).size() == 1)
     m_db.addQuery(bind::fapp(m_parent.bbPredicate(*exit), mk<TRUE>(m_efac)));
   else if (F.getName().equals("main") && ls.live(exit).size() == 0)
@@ -515,7 +801,6 @@ void LargeHornifyFunction::runOnFunction(Function &F) {
 
     Expr falseE = mk<FALSE>(m_efac);
     ExprVector postArgs{mk<TRUE>(m_efac), falseE, falseE};
-    const FunctionInfo &fi = m_sem.getFunctionInfo(F);
     evalArgs(fi, m_sem, s, std::back_inserter(postArgs));
     // -- use a mutable gate to put everything together
     expr::filter(mknary<OUT_G>(postArgs), bind::IsConst(),

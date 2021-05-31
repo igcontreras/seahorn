@@ -204,6 +204,14 @@ add_lit_testsuite(test-inter-mem-fmap "Tests for inter-mem with fmaps encoding"
   -v
   -j1
   ${CMAKE_CURRENT_SOURCE_DIR}/inter-mem-fmap
+    ARGS
+  --path=${CMAKE_INSTALL_PREFIX}/bin
+  DEPENDS seahorn
+  )
+
+add_lit_testsuite(test-synth "Regression tests for Small+Large Step Synthesis"
+  -v
+  ${CMAKE_CURRENT_SOURCE_DIR}/synth
   ARGS
   --path=${CMAKE_INSTALL_PREFIX}/bin
   DEPENDS seahorn
@@ -236,6 +244,7 @@ if (CMAKE_GENERATOR STREQUAL "Ninja")
   add_dependencies(test-inter-mem-fmap install)
   add_dependencies(test-fat-ptr-sym install)
   add_dependencies(test-opsem-extra-widemem install)
+  add_dependencies(test-synth install)
 
 endif()
 install (DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/simple DESTINATION share/seahorn/test)
@@ -263,3 +272,4 @@ install (PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/dsa/check_graphs.py DESTINATION sh
 install (PROGRAMS ${CMAKE_CURRENT_SOURCE_DIR}/tutorial/seatest.py DESTINATION share/seahorn/test/tutorial)
 install (DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inter-mem DESTINATION share/seahorn/test)
 install (DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inter-mem-fmap DESTINATION share/seahorn/test)
+install (DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/synth DESTINATION share/seahorn/test)

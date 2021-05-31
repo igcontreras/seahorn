@@ -1,4 +1,5 @@
 import sys
+
 import sea
 
 
@@ -21,10 +22,20 @@ class Yama(sea.CliCmd):
         return argp
 
     def parse_yaml_options(self, fname):
+        import urllib.parse
+        import urllib.request
+
         import yaml
         try:
-            with open(fname) as f:
-                data = yaml.load(f, Loader=yaml.SafeLoader)
+            data = dict()
+
+            url = urllib.parse.urlparse(fname)
+            if url.scheme is not None and len(url.scheme) > 0:
+                with urllib.request.urlopen(fname) as f:
+                    data = yaml.load(f, Loader=yaml.SafeLoader)
+            else:
+                with open(fname, 'r') as f:
+                    data = yaml.load(f, Loader=yaml.SafeLoader)
 
             # common containers for options
             if 'verify_options' in data:
@@ -50,6 +61,25 @@ class Yama(sea.CliCmd):
                 return None
             print("Error: could not parse", fname)
             sys.exit(1)
+
+    def parse_extra_options(self, extra):
+        args = dict()
+        positional = list(filter(lambda x: not x.startswith('-'), extra))
+        flags = list(filter(lambda x: x.startswith('-'), extra))
+
+        for kv in flags:
+            # strip '--' if present
+            if kv.startswith('--'):
+                kv = kv[2:]
+            # attempt to split into key, value pair
+            kvs = kv.split('=')
+            # use pair if successful, and original option otherwise
+            if len(kvs) == 2:
+                args[kvs[0]] = kvs[1]
+            else:
+                args[kv] = ''
+
+        return args, positional
 
     def mk_cli_from_key_value(self, _key, _value):
         """
@@ -94,8 +124,9 @@ class Yama(sea.CliCmd):
         return command, res
 
     def run(self, args=None, _extra=[]):
-        import sys
         import os
+        import os.path
+        import sys
 
         self._ignore_error = args.yforce
         # set default value
@@ -105,7 +136,7 @@ class Yama(sea.CliCmd):
         extra = args.extra
         args_dict = None
         for f in args.yconfig:
-            assert(len(f) == 1)
+            assert len(f) == 1
             yaml_args = self.parse_yaml_options(f[0])
             if yaml_args is None:
                 continue
@@ -114,14 +145,27 @@ class Yama(sea.CliCmd):
             else:
                 args_dict.update(yaml_args)
 
+        extra_cli_args, extra = self.parse_extra_options(extra)
+        if args_dict is None:
+            args_dict = extra_cli_args
+        else:
+            args_dict.update(extra_cli_args)
+
         cli = list()
         if args_dict is not None:
             command, cli = self.mk_cli_from_dict(args_dict)
 
         # override command if specified on command line
-        if len(extra) > 0 and not extra[0].startswith('-'):
+        # but ignore files
+        if len(extra) > 0 and not extra[0].startswith('-') and \
+           not os.path.isfile(extra[0]):
             command = extra[0]
             extra = extra[1:]
+
+        if command is None:
+            print('Error: no sea sub-command specified. Use pf, bpf, ...',
+                  file=sys.stderr)
+            return 1
 
         cmd_args = []
         cmd_args.append(sys.argv[0])

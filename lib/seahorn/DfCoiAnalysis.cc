@@ -26,12 +26,19 @@ void DfCoiAnalysis::analyze(User &user) {
 
     if (auto *LI = dyn_cast<LoadInst>(&u)) {
       auto *v = analyzeLoad(*LI);
-      if (v)
+      if (v) {
         workList.push_back(v);
+      }
     } else if (auto *MI = dyn_cast<MemTransferInst>(&u)) {
       auto *v = analyzeMemTransfer(*MI);
-      if (v)
+      if (v) {
         workList.push_back(v);
+      }
+    } else if (auto *AI = dyn_cast<AllocaInst>(&u)) {
+      auto *v = analyzeAllocaInst(*AI);
+      if (v) {
+        workList.push_back(v);
+      }
     } else if (auto *CI = dyn_cast<CallInst>(&u)) {
       CallSite CS(CI);
       if (CS.getCalledFunction()) {
@@ -42,9 +49,10 @@ void DfCoiAnalysis::analyze(User &user) {
           assert(it != CI->getParent()->end());
           workList.push_back(&*it);
         } else if (CS.getCalledFunction()->getName().equals(
-                       "sea.is_modified")) {
+                       "sea.is_modified") ||
+                   (CS.getCalledFunction()->getName().equals("sea.is_alloc"))) {
           //  instruction that precedes has to be
-          //  1. shadowmem.load load
+          //  1. shadowmem.load
           BasicBlock::iterator it(CI);
           --it;
           if (auto *CI = dyn_cast<CallInst>(&*it)) {
@@ -52,9 +60,10 @@ void DfCoiAnalysis::analyze(User &user) {
             assert(CS.getCalledFunction()->getName().equals("shadow.mem.load"));
             workList.push_back(&*it);
           } else if (CS.getCalledFunction()->getName().equals(
-                         "sea.reset_modified")) {
+                         "sea.reset_modified") ||
+                     (CS.getCalledFunction()->getName().equals("sea.free"))) {
             //  instruction that precedes has to be
-            //  1. shadowmem.store load
+            //  1. shadowmem.store
             BasicBlock::iterator it(CI);
             --it;
             if (auto *CI = dyn_cast<CallInst>(&*it)) {
@@ -106,6 +115,23 @@ CallInst *DfCoiAnalysis::analyzeMemTransfer(MemTransferInst &MI) {
   if (auto *CI = dyn_cast<CallInst>(&*it)) {
     CallSite CS(CI);
     assert(CS.getCalledFunction()->getName().equals("shadow.mem.trsfr.load"));
+    return CI;
+  }
+  return nullptr;
+}
+
+CallInst *DfCoiAnalysis::analyzeAllocaInst(AllocaInst &AI) {
+  BasicBlock::iterator it(&AI);
+  BasicBlock *parent = AI.getParent();
+  assert(parent);
+  if (it == parent->begin())
+    return nullptr;
+
+  --it;
+  if (auto *CI = dyn_cast<CallInst>(&*it)) {
+    CallSite CS(CI);
+    assert(CS.getCalledFunction()->getName().equals("shadow.mem.load") ||
+           CS.getCalledFunction()->getName().equals("shadow.mem.store"));
     return CI;
   }
   return nullptr;

@@ -29,6 +29,7 @@ public:
   // setting TrackingTag to int disqualifies this class as having tracking
   using TrackingTag = int;
   using FatMemTag = int;
+  using WideMemTag = MemoryFeatures::WideMem_tag;
 
   using RawPtrTy = OpSemMemManager::PtrTy;
   using RawMemValTy = OpSemMemManager::MemValTy;
@@ -76,7 +77,7 @@ public:
 
     explicit MemValTyImpl(const Expr &e) {
       // Our ptr is a struct of two exprs
-      assert(strct::isStructVal(e));
+      assert(!e || strct::isStructVal(e));
       m_v = e;
     }
 
@@ -84,9 +85,9 @@ public:
     Expr toExpr() const { return v(); }
     explicit operator Expr() const { return toExpr(); }
 
-    RawMemValTy getRaw() { return strct::extractVal(m_v, 0); }
+    RawMemValTy getRaw() { return !m_v ? m_v : strct::extractVal(m_v, 0); }
 
-    RawMemValTy getSize() { return strct::extractVal(m_v, 1); }
+    RawMemValTy getSize() { return !m_v ? m_v : strct::extractVal(m_v, 1); }
   };
 
   struct PtrSortTyImpl {
@@ -251,6 +252,8 @@ public:
   RawPtrTy getAddressable(PtrTy p) const;
 
   bool isPtrTyVal(Expr e) const;
+
+  bool isMemVal(Expr e) const;
 
   Expr getSize(PtrTy p);
 

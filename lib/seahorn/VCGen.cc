@@ -69,7 +69,8 @@ void VCGen::checkSideAtBb(unsigned &head, ExprVector &side, Expr pathCond,
   ScopedStats __st__("VCGen.smt");
   Expr a[1] = {pathCond};
 
-  LOG("pedge", std::error_code EC;
+  LOG(
+      "pedge", std::error_code EC;
       raw_fd_ostream file("/tmp/p-edge.smt2", EC, sys::fs::F_Text); if (!EC) {
         file << "(set-info :original \"" << edge.source().bb().getName()
              << " --> " << bb.getName() << " --> "
@@ -109,12 +110,13 @@ void VCGen::checkSideAtEnd(unsigned &head, ExprVector &side,
 }
 
 void VCGen::genVcForCpEdgeLegacy(SymStore &s, const CpEdge &edge,
-                                 ExprVector &side) {
+                                 ExprVector &side, bool includePhi) {
   OpSemContextPtr ctx = m_sem.mkContext(s, side);
-  genVcForCpEdge(*ctx, edge);
+  genVcForCpEdge(*ctx, edge, includePhi);
 }
 
-void VCGen::genVcForCpEdge(OpSemContext &ctx, const CpEdge &edge) {
+void VCGen::genVcForCpEdge(OpSemContext &ctx, const CpEdge &edge,
+                           bool includePhi) {
   const CutPoint &target = edge.target();
 
   std::unique_ptr<EZ3> zctx(nullptr);
@@ -146,13 +148,15 @@ void VCGen::genVcForCpEdge(OpSemContext &ctx, const CpEdge &edge) {
       checkSideAtBb(head, ctx.side(), bbV, *smt, edge, bb);
   }
 
-  // -- generate side condition for the last basic block on the edge
-  // -- this executes only PHINode instructions in target.bb()
-  genVcForBasicBlockOnEdge(ctx, edge, target.bb(), true);
+  if (includePhi) {
+    // -- generate side condition for the last basic block on the edge
+    // -- this executes only PHINode instructions in target.bb()
+    genVcForBasicBlockOnEdge(ctx, edge, target.bb(), true);
 
-  // -- check consistency of side-conditions at the end
-  if (smt)
-    checkSideAtEnd(head, ctx.side(), *smt);
+    // -- check consistency of side-conditions at the end
+    if (smt)
+      checkSideAtEnd(head, ctx.side(), *smt);
+  }
 }
 
 namespace sem_detail {

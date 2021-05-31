@@ -14,6 +14,7 @@
 
 #include "seahorn/Analysis/CanFail.hh"
 #include "seahorn/Analysis/CutPointGraph.hh"
+#include "seahorn/Analysis/SeaBuiltinsInfo.hh"
 #include "seahorn/HornClauseDB.hh"
 
 #include "seahorn/InterMemPreProc.hh"
@@ -85,6 +86,9 @@ public:
   InterMemPreProc &getInterMemPP() {
     assert(m_imPreProc);
     return *m_imPreProc;
+
+  SeaBuiltinsInfo &getSBI() {
+    return getAnalysis<SeaBuiltinsInfoWrapperPass>().getSBI();
   }
 };
 } // namespace seahorn

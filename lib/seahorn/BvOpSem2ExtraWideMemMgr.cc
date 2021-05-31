@@ -12,7 +12,7 @@ namespace details {
 static const unsigned int g_slotBitWidth = 64;
 static const unsigned int g_slotByteWidth = g_slotBitWidth / 8;
 
-static const unsigned int g_uninit = 0xDEADBEEF;
+static const unsigned int g_uninit_size = 0;
 static const unsigned int g_uninit_small = 0xDEAD;
 static const unsigned int g_num_slots = 3;
 
@@ -25,7 +25,7 @@ ExtraWideMemManager<T>::ExtraWideMemManager(Bv2OpSem &sem, Bv2OpSemContext &ctx,
       m_main(sem, ctx, ptrSz, wordSz, useLambdas),
       m_offset(sem, ctx, ptrSz, ptrSz, useLambdas, true),
       m_size(sem, ctx, ptrSz, g_slotByteWidth, useLambdas, true),
-      m_uninit_size(m_ctx.alu().ui(g_uninit, g_slotBitWidth)),
+      m_uninit_size(m_ctx.alu().ui(g_uninit_size, g_slotBitWidth)),
       m_nullPtr(PtrTy(m_main.nullPtr(), m_ctx.alu().ui(0UL, ptrSizeInBits()),
                       m_uninit_size)) {
   // Currently, we only support RawMemManagerCore or subclasses of it.
@@ -42,20 +42,15 @@ template <class T>
 typename ExtraWideMemManager<T>::RawMemValTy
 ExtraWideMemManager<T>::setModified(ExtraWideMemManager::PtrTy ptr,
                                     ExtraWideMemManager::MemValTy mem) {
-  if (!m_ctx.isTrackingOn()) {
-    LOG("opsem.memtrack.verbose",
-        errs() << "Ignoring setModified(); Memory tracking is off"
-               << "\n";);
-    return mem.getRaw();
-  }
-  return memsetMetaData(ptr, 1 /* len */, mem, 1U /* val */).getRaw();
+  return setMetadata(MetadataKind::WRITE, ptr, mem, 1U /* val */).getRaw();
 }
 
 template <class T>
-Expr ExtraWideMemManager<T>::isModified(ExtraWideMemManager::PtrTy ptr,
-                                        ExtraWideMemManager::MemValTy mem) {
+Expr ExtraWideMemManager<T>::isMetadataSet(MetadataKind kind,
+                                           ExtraWideMemManager::PtrTy ptr,
+                                           ExtraWideMemManager::MemValTy mem) {
   // The width of the value will be wordSz
-  Expr val = getMetaData(ptr, mem, 1);
+  Expr val = getMetaData(kind, ptr, mem, 1);
   if (val == Expr()) {
     return m_ctx.alu().getTrue();
   }
@@ -106,7 +101,12 @@ ExtraWideMemManager<T>::getAddressable(ExtraWideMemManager::PtrTy p) const {
 }
 
 template <class T> bool ExtraWideMemManager<T>::isPtrTyVal(Expr e) const {
-  return strct::isStructVal(e) && e->arity() == g_num_slots;
+  return e && strct::isStructVal(e) && e->arity() == g_num_slots;
+}
+
+template <class T> bool ExtraWideMemManager<T>::isMemVal(Expr e) const {
+  // Our base is a struct of three exprs
+  return e && strct::isStructVal(e) && e->arity() == g_num_slots;
 }
 
 template <class T>
@@ -140,6 +140,7 @@ ExtraWideMemManager<T>::zeroedMemory() const {
   return MemValTy(m_main.zeroedMemory(), m_offset.zeroedMemory(),
                   m_size.zeroedMemory());
 }
+
 template <class T>
 std::pair<char *, unsigned int>
 ExtraWideMemManager<T>::getGlobalVariableInitValue(const GlobalVariable &gv) {
@@ -258,9 +259,8 @@ ExtraWideMemManager<T>::storeValueToMem(Expr _val,
   const unsigned byteSz =
       m_sem.getTD().getTypeStoreSize(const_cast<llvm::Type *>(&ty));
   ExprFactory &efac = base.v()->efac();
-  // init memval to a default value
-  MemValTy res(m_main.zeroedMemory(),
-               m_ctx.alu().ui(g_uninit_small, wordSizeInBits()), m_uninit_size);
+  // init memval to a non det value
+  MemValTy res = MemValTy(Expr());
   switch (ty.getTypeID()) {
   case Type::IntegerTyID:
     if (ty.getScalarSizeInBits() < byteSz * 8) {
@@ -604,27 +604,30 @@ Expr ExtraWideMemManager<T>::bytesToSlotExpr(unsigned int bytes) {
 }
 template <class T>
 typename ExtraWideMemManager<T>::MemValTy
-ExtraWideMemManager<T>::memsetMetaData(ExtraWideMemManager::PtrTy ptr,
+ExtraWideMemManager<T>::memsetMetaData(MetadataKind kind,
+                                       ExtraWideMemManager::PtrTy ptr,
                                        unsigned int len,
                                        ExtraWideMemManager::MemValTy memIn,
                                        unsigned int val) {
-  auto rawOut = m_main.memsetMetaData(ptr.getBase(), len, memIn.getRaw(), val);
+  auto rawOut =
+      m_main.memsetMetaData(kind, ptr.getBase(), len, memIn.getRaw(), val);
   return MemValTy(rawOut, memIn.getOffset(), memIn.getSize());
 }
 template <class T>
 typename ExtraWideMemManager<T>::MemValTy
-ExtraWideMemManager<T>::memsetMetaData(ExtraWideMemManager::PtrTy ptr, Expr len,
+ExtraWideMemManager<T>::memsetMetaData(MetadataKind kind,
+                                       ExtraWideMemManager::PtrTy ptr, Expr len,
                                        ExtraWideMemManager::MemValTy memIn,
                                        unsigned int val) {
-  auto rawOut = m_main.memsetMetaData(ptr.getBase(), len, memIn.getRaw(), val);
+  auto rawOut =
+      m_main.memsetMetaData(kind, ptr.getBase(), len, memIn.getRaw(), val);
   return MemValTy(rawOut, memIn.getOffset(), memIn.getSize());
 }
 
 template <class T>
-Expr ExtraWideMemManager<T>::getMetaData(ExtraWideMemManager::PtrTy ptr,
-                                         ExtraWideMemManager::MemValTy memIn,
-                                         unsigned int byteSz) {
-  return m_main.getMetaData(ptr.getBase(), memIn.getRaw(), byteSz);
+Expr ExtraWideMemManager<T>::getMetaData(MetadataKind kind, PtrTy ptr,
+                                         MemValTy memIn, unsigned int byteSz) {
+  return m_main.getMetaData(kind, ptr.getBase(), memIn.getRaw(), byteSz);
 }
 
 template <class T>
@@ -632,16 +635,16 @@ unsigned int ExtraWideMemManager<T>::getMetaDataMemWordSzInBits() {
   return m_main.getMetaDataMemWordSzInBits();
 }
 template <class T>
-typename ExtraWideMemManager<T>::MemValTy
-ExtraWideMemManager<T>::resetModified(ExtraWideMemManager::PtrTy ptr,
-                                      ExtraWideMemManager::MemValTy mem) {
-  if (!m_ctx.isTrackingOn()) {
+typename ExtraWideMemManager<T>::MemValTy ExtraWideMemManager<T>::setMetadata(
+    MetadataKind kind, ExtraWideMemManager::PtrTy ptr,
+    ExtraWideMemManager::MemValTy mem, unsigned val) {
+  if (!m_ctx.isTrackingOn() && kind != MetadataKind::ALLOC) {
     LOG("opsem.memtrack.verbose",
-        errs() << "Ignoring resetModified();Memory tracking is off"
-               << "\n";);
+        WARN << "Ignoring setMetadata();Memory tracking is off"
+             << "\n";);
     return mem;
   }
-  return memsetMetaData(ptr, 1 /* len */, mem, 0U /* val */);
+  return memsetMetaData(kind, ptr, 1 /* len */, mem, val);
 }
 template <class T>
 Expr ExtraWideMemManager<T>::ptrUlt(ExtraWideMemManager::PtrTy p1,

@@ -13,7 +13,7 @@ namespace details {
 static const unsigned int g_slotBitWidth = 64;
 static const unsigned int g_slotByteWidth = g_slotBitWidth / 8;
 
-static const unsigned int g_uninit = 0xDEADBEEF;
+static const unsigned int g_uninit_size = 0;
 static const unsigned int g_num_slots = 2;
 
 WideMemManager::WideMemManager(Bv2OpSem &sem, Bv2OpSemContext &ctx,
@@ -22,7 +22,7 @@ WideMemManager::WideMemManager(Bv2OpSem &sem, Bv2OpSemContext &ctx,
                      false /* this is a nop since we delegate to RawMemMgr */),
       m_main(sem, ctx, ptrSz, wordSz, useLambdas),
       m_size(sem, ctx, ptrSz, g_slotByteWidth, useLambdas, true),
-      m_uninit_size(m_ctx.alu().ui(g_uninit, g_slotBitWidth)),
+      m_uninit_size(m_ctx.alu().ui(g_uninit_size, g_slotBitWidth)),
       m_nullPtr(PtrTy(m_main.nullPtr(), m_uninit_size)) {}
 
 Expr WideMemManager::castWordSzToSlotSz(const Expr val) const {
@@ -73,6 +73,7 @@ Expr WideMemManager::isDereferenceable(WideMemManager::PtrTy p, Expr byteSz) {
 WideMemManager::MemValTy WideMemManager::zeroedMemory() const {
   return MemValTy(m_main.zeroedMemory(), m_size.zeroedMemory());
 }
+
 std::pair<char *, unsigned int>
 WideMemManager::getGlobalVariableInitValue(const GlobalVariable &gv) {
   return m_main.getGlobalVariableInitValue(gv);
@@ -155,8 +156,8 @@ WideMemManager::storeValueToMem(Expr _val, WideMemManager::PtrTy ptr,
   const unsigned byteSz =
       m_sem.getTD().getTypeStoreSize(const_cast<llvm::Type *>(&ty));
   ExprFactory &efac = ptr.v()->efac();
-  // init memval to a default value
-  MemValTy res(m_ctx.alu().ui(0UL, wordSizeInBits()), m_uninit_size);
+  // init memval to a non det value
+  MemValTy res = MemValTy(Expr());
   switch (ty.getTypeID()) {
   case Type::IntegerTyID:
     if (ty.getScalarSizeInBits() < byteSz * 8) {
@@ -480,7 +481,12 @@ Expr WideMemManager::ptrSub(WideMemManager::PtrTy p1,
 }
 
 bool WideMemManager::isPtrTyVal(Expr e) const {
-  return strct::isStructVal(e) && e->arity() == g_num_slots;
+  return e && strct::isStructVal(e) && e->arity() == g_num_slots;
+}
+
+bool WideMemManager::isMemVal(Expr e) const {
+  // struct of raw and size
+  return e && strct::isStructVal(e) && e->arity() == g_num_slots;
 }
 
 OpSemMemManager *mkWideMemManager(Bv2OpSem &sem, Bv2OpSemContext &ctx,

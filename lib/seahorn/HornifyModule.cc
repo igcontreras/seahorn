@@ -457,6 +457,8 @@ bool HornifyModule::runOnFunction(Function &F) {
 void HornifyModule::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
   AU.setPreservesAll();
 
+  AU.addRequired<SeaBuiltinsInfoWrapperPass>();
+
   AU.addRequired<seahorn::CanFail>();
   AU.addRequired<seahorn::NameValues>();
 

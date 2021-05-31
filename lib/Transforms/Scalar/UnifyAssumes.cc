@@ -8,6 +8,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
@@ -16,6 +17,11 @@
 #include "seahorn/Support/SeaDebug.h"
 #include "seahorn/Support/SeaLog.hh"
 using namespace llvm;
+
+static cl::opt<bool> EnableDae(
+    "enable-dae",
+    cl::desc("Enabled eliminating dead asserts, i.e.,  verifier.assert(true)"),
+    cl::init(false));
 
 namespace {
 class UnifyAssumesPass : public ModulePass {
@@ -58,7 +64,8 @@ char UnifyAssumesPass::ID = 0;
 bool UnifyAssumesPass::isAssumeCall(const CallInst &ci) {
   using namespace seahorn;
   switch (m_SBI->getSeaBuiltinOp(ci)) {
-  default: return false;
+  default:
+    return false;
   case SeaBuiltinsOp::ASSUME:
   case SeaBuiltinsOp::ASSUME_NOT:
     return true;
@@ -138,9 +145,14 @@ bool UnifyAssumesPass::runOnFunction(Function &F) {
   for (auto ci : assumes)
     ci->eraseFromParent();
 
+  // -- process all asserts
   for (auto ci : asserts) {
     processAssertInst(*ci, *assumeFlag);
   }
+
+  // -- cleanup the asserts vector
+  asserts.clear();
+
   // insert call to assume before the last instructions of the exit block
   // (maybe before seahorn.fail)
   CallInst *seaFailCall = findSeahornFail(F);
@@ -172,10 +184,19 @@ void UnifyAssumesPass::processAssertInst(CallInst &CI, AllocaInst &flag) {
   llvm::CallSite CS(&CI);
   IRBuilder<> B(bb);
   B.SetInsertPoint(&CI);
+  Value *conseq = CS.getArgument(0);
+  // remove instruction if verifier.assert(true)
+  if (EnableDae) {
+    if (auto *conseq_const = dyn_cast<llvm::ConstantInt>(conseq)) {
+      if (!conseq_const->isZero()) {
+        CI.eraseFromParent();
+        return;
+      }
+    }
+  }
   auto ante = B.CreateLoad(&flag);
   // negate condition if verifier.assert.not seen
   bool isNot = m_SBI->getSeaBuiltinOp(CI) == seahorn::SeaBuiltinsOp::ASSERT_NOT;
-  Value *conseq = CS.getArgument(0);
   if (isNot) {
     conseq = B.CreateNot(conseq);
   }

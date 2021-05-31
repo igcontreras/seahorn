@@ -80,7 +80,7 @@ if (GIT_FOUND)
   add_custom_target (sea-dsa-git
     ${GIT_EXECUTABLE} clone ${SEA_DSA_REPO} ${CMAKE_SOURCE_DIR}/sea-dsa -b dev10)
   add_custom_target (clam-git
-    ${GIT_EXECUTABLE} clone ${CLAM_REPO} ${CMAKE_SOURCE_DIR}/clam -b dev10)
+    ${GIT_EXECUTABLE} clone ${CLAM_REPO} ${CMAKE_SOURCE_DIR}/clam)
   add_custom_target (extra
     ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_LIST_FILE}
     DEPENDS
@@ -168,31 +168,6 @@ if (YICES2_FOUND)
   endif()
 endif()  
 
-# if top-level, offer to build llvm
-ExternalProject_Add (llvm
-  SVN_REPOSITORY http://llvm.org/svn/llvm-project/llvm/tags/RELEASE_800/final/
-  SOURCE_DIR ${CMAKE_SOURCE_DIR}/ext/llvm
-  INSTALL_DIR ${CMAKE_BINARY_DIR}/run
-  CMAKE_ARGS
-  -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
-  -DCMAKE_BUILD_TYPE:STRING=${EXT_CMAKE_BUILD_TYPE}
-  -DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>
-  -DLLVM_TARGETS_TO_BUILD:STRING=X86 -DWITH_POLY:BOOL=OFF
-  -DLLVM_ENABLE_PEDANTIC=OFF
-  -DLLVM_ENABLE_LLD=${SEA_ENABLE_LLD}
-  -DLLVM_ENABLE_PIC=ON 
-  -DLLVM_BUILD_LLVM_DYLIB:BOOL=${BUILD_SEA_DSA_LIBS_SHARED}
-  -DLLVM_INCLUDE_TESTS:BOOL=OFF
-  -DLLVM_INCLUDE_GO_TESTS=OFF
-  -DLLVM_INCLUDE_EXAMPLES=OFF
-  -DLLVM_INCLUDE_DOCS=OFF
-  -DLLVM_BINDINGS_LIST=" "
-  TEST_AFTER_INSTALL 1
-  TEST_COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_LIST_FILE}
-  LOG_CONFIGURE 1
-  LOG_BUILD 1
-  LOG_INSTALL 1)
-
 find_package (LLVM 10 CONFIG)
 if (NOT LLVM_FOUND)
   ExternalProject_Get_Property (llvm INSTALL_DIR)
@@ -201,7 +176,6 @@ if (NOT LLVM_FOUND)
     "Forced location of LLVM cmake config" FORCE)
   message (WARNING "No llvm found. Run \n\tcmake --build . && cmake ${CMAKE_SOURCE_DIR}")
 else()
-  set_target_properties(llvm PROPERTIES EXCLUDE_FROM_ALL ON)
 
   message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
   message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -422,12 +396,6 @@ endif()
 
 if (IS_DIRECTORY ${CMAKE_SOURCE_DIR}/clam AND
     EXISTS ${CMAKE_SOURCE_DIR}/clam/CMakeLists.txt)
-  if (NOT CLAM_ALL_DOMAINS)
-    set(CLAM_ALL_DOMAINS OFF CACHE BOOL "Include all crab abstract domains" FORCE)
-  endif()
-  if (NOT CLAM_ENABLE_INTER)
-    set(CLAM_ENABLE_INTER OFF CACHE BOOL "Include crab inter-procedural analysis" FORCE)
-  endif()
   add_subdirectory(${CMAKE_SOURCE_DIR}/clam)
   set(HAVE_CLAM TRUE)
   include_directories (BEFORE ${CLAM_INCLUDE_DIRS})

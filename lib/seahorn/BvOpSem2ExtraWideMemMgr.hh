@@ -20,10 +20,6 @@ template <class T> class ExtraWideMemManager : public MemManagerCore {
   /// \brief Base name for non-deterministic pointer
   Expr m_freshPtrName;
 
-  /// \brief Register that contains the value of the stack pointer on
-  /// function entry
-  Expr m_sp0;
-
   /// \brief Source of unique identifiers
   mutable unsigned m_id;
 
@@ -43,6 +39,7 @@ public:
   using TrackingTag = typename T::TrackingTag;
   // We don't support composing ExtraWideMemManager using FatMemManager
   using FatMemTag = int;
+  using WideMemTag = MemoryFeatures::WideMem_tag;
 
   using RawPtrTy = typename T::PtrTy;
   using RawMemValTy = typename T::MemValTy;
@@ -96,10 +93,10 @@ public:
     }
 
     explicit MemValTyImpl(const Expr &e) {
-      // Our base is a struct of three exprs
-      assert(strct::isStructVal(e));
-      assert(!strct::isStructVal(e->arg(1)));
-      assert(!strct::isStructVal(e->arg(2)));
+      // Our base is Expr() or a struct of three exprs
+      assert(!e || strct::isStructVal(e));
+      assert(!e || !strct::isStructVal(e->arg(1)));
+      assert(!e || !strct::isStructVal(e->arg(2)));
       m_v = e;
     }
 
@@ -107,11 +104,11 @@ public:
     Expr toExpr() const { return v(); }
     explicit operator Expr() const { return toExpr(); }
 
-    RawMemValTy getRaw() { return strct::extractVal(m_v, 0); }
+    RawMemValTy getRaw() { return !m_v ? m_v : strct::extractVal(m_v, 0); }
 
-    Expr getOffset() { return strct::extractVal(m_v, 1); }
+    Expr getOffset() { return !m_v ? m_v : strct::extractVal(m_v, 1); }
 
-    Expr getSize() { return strct::extractVal(m_v, 2); }
+    Expr getSize() { return !m_v ? m_v : strct::extractVal(m_v, 2); }
   };
 
   struct PtrSortTyImpl {
@@ -274,28 +271,32 @@ public:
   setModified(ExtraWideMemManager::PtrTy ptr,
               ExtraWideMemManager::MemValTy mem);
 
-  Expr isModified(ExtraWideMemManager::PtrTy ptr,
-                  ExtraWideMemManager::MemValTy mem);
+  Expr isMetadataSet(MetadataKind kind, ExtraWideMemManager::PtrTy ptr,
+                     ExtraWideMemManager::MemValTy mem);
 
   typename ExtraWideMemManager<T>::MemValTy
-  resetModified(ExtraWideMemManager::PtrTy ptr,
-                ExtraWideMemManager::MemValTy mem);
+  setMetadata(MetadataKind kind, ExtraWideMemManager::PtrTy ptr,
+              ExtraWideMemManager::MemValTy mem, unsigned val);
 
   typename ExtraWideMemManager<T>::MemValTy
-  memsetMetaData(ExtraWideMemManager::PtrTy ptr, unsigned int len,
+  memsetMetaData(MetadataKind kind, ExtraWideMemManager::PtrTy ptr,
+                 unsigned int len, ExtraWideMemManager::MemValTy memIn,
+                 unsigned int val);
+
+  typename ExtraWideMemManager<T>::MemValTy
+  memsetMetaData(MetadataKind kind, ExtraWideMemManager::PtrTy ptr, Expr len,
                  ExtraWideMemManager::MemValTy memIn, unsigned int val);
 
-  typename ExtraWideMemManager<T>::MemValTy
-  memsetMetaData(ExtraWideMemManager::PtrTy ptr, Expr len,
-                 ExtraWideMemManager::MemValTy memIn, unsigned int val);
-
-  Expr getMetaData(PtrTy ptr, MemValTy memIn, unsigned int byteSz);
+  Expr getMetaData(MetadataKind kind, PtrTy ptr, MemValTy memIn,
+                   unsigned int byteSz);
 
   unsigned int getMetaDataMemWordSzInBits();
 
   RawPtrTy getAddressable(PtrTy p) const;
 
   bool isPtrTyVal(Expr e) const;
+
+  bool isMemVal(Expr e) const;
 
   Expr getSize(PtrTy p) const;
 
